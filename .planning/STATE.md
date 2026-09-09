@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: QC Engine Seam and Pinned Environment
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-09-09T19:39:57.754Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-09-09T19:53:39.034Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 01 execution started
-state_head: 311b35c58cad406051ffc5c564761be1b4dba943
+state_head: 120de1dcaa60fe161c42922a7c7008d492f788e7
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 01 (QC Engine Seam and Pinned Environment) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-09-09 — Phase 01 execution started
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 01 P01 | 25 min | 2 tasks | 4 files |
 | Phase 01 P02 | 17min | 3 tasks | 5 files |
+| Phase 01 P03 | 15min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Created a project-local .venv (already gitignored) to work around macOS Homebrew's PEP 668 externally-managed-environment pip restriction; not a shipped project convention, just a local install path.
 - [Phase 01]: Row 1's timestamp cell is a deliberate Python None, not a string, since app.py's rule-1 null check only catches real NaN/None via .isnull(), not empty strings. — Documented as the sole exception to 'every cell is a string' in tests/fixtures.py's module docstring.
 - [Phase 01]: Reordered tests/fixtures.py's Takeoffpoint columns to put globalid first, not name, to avoid a pre-existing app.py column-duplication bug in run_takeoff_qc's BASE list construction. — Real app.py behavior unrelated to TP2-TP5 rules under test; fixture column order isn't pinned by acceptance criteria (set match only).
+- [Phase 01]: sys.meta_path finders must implement find_spec, not find_module, under CPython 3.13 — verified empirically before writing the qc/ import-boundary subprocess test.
+- [Phase 01]: qc/ package cut through the Schema layer as the phase's tracer slice: registry (qc/results.py), relocated constants/predicates/schema, and app.py now calls qc.schema.run_schema_qc + qc.sort_by_registry at the real call site.
 
 ### Pending Todos
 
@@ -89,6 +92,7 @@ None yet.
 - [Phase 4] Open item — data-governance sign-off for hosting settlement coordinates and population figures on a third-party free tier. Named decision required before DEPLOY-01 rollout.
 - [Phase 6] Open item — threshold values (household size range, target/population fraction, team-day distance). Blocks CONFIG-03, and Phase 7's POP-01, POP-02, TEAM-01, GEO-04. No published standard exists; must be supplied locally.
 - [Phase 6] Open item — whether a boundary-vintage failure counts toward the weighted score. Blocks ADVIS-01, GEO-03.
+- [Phase 01] WINDOWS.md #1 (open, deviation): Task 1's acceptance criterion 'grep -c VALID_ACC app.py reports 1' is unsatisfiable until plan 04 relocates run_mlos_qc out of app.py — VALID_ACC still has a legitimate non-import usage there.
 
 ## Deferred Items
 
@@ -100,6 +104,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-09T19:39:57.741Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-09-09T19:53:39.020Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None

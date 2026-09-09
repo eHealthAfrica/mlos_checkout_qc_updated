@@ -90,7 +90,7 @@ Item in REQUIREMENTS.md).
   4. A clean `pip install -r requirements.txt` resolves reproducibly to `pandas==3.0.5` with `numpy` explicitly declared and upper-bounded
   5. Two runs over identical data in separate processes emit checks in byte-identical order — the eight Rule 12 profile-flag checks included — so two reports can be diffed row-for-row
 
-**Plans**: 2/6 plans executed
+**Plans**: 3/6 plans executed
 
 Plans:
 **Wave 1**
@@ -103,7 +103,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md — Tracer: the qc/ registry seam proven end to end through the Schema layer
+- [x] 01-03-PLAN.md — Tracer: the qc/ registry seam proven end to end through the Schema layer
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -229,7 +229,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. QC Engine Seam and Pinned Environment | 2/6 | In Progress|  |
+| 1. QC Engine Seam and Pinned Environment | 3/6 | In Progress|  |
 | 2. Detection Correctness and Three-Format Harness | 0/TBD | Not started | - |
 | 3. Verdict and Report Integrity | 0/TBD | Not started | - |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
