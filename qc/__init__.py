@@ -9,6 +9,8 @@ re-sort helper every layer's call site pipes its checks through.
 
 from . import schema
 from . import mlos
+from . import settlement
+from . import takeoff
 from .results import Rule, register, canonical_order
 
 
