@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: QC Engine Seam and Pinned Environment
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-09-09T20:10:17.452Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-09-09T20:24:39.808Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 01 execution started
-state_head: 763a24b0dafa24ab64e64cc8dc525e1dfab0c471
+state_head: 391ad9170e6f777b9cf8f8b1cbe5bd294c6a04a8
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 01 (QC Engine Seam and Pinned Environment) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-09-09 — Phase 01 execution started
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 17min | 3 tasks | 5 files |
 | Phase 01 P03 | 15min | 3 tasks | 9 files |
 | Phase 01 P04 | 15min | 3 tasks | 5 files |
+| Phase 01 P05 | 12min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 01]: qc/ package cut through the Schema layer as the phase's tracer slice: registry (qc/results.py), relocated constants/predicates/schema, and app.py now calls qc.schema.run_schema_qc + qc.sort_by_registry at the real call site.
 - [Phase 01]: [Phase 01] Unrolled R11's loop into three explicit per-column add() calls (urban/rural/scattered) so the literal identifier appears in both the register() call and the emission path, satisfying the plan's grep-based acceptance criterion; R12's loop over YN_NA_COLS stays a genuine loop per the plan's key_links.
 - [Phase 01]: [Phase 01] FROZEN_IDENTIFIERS in tests/test_rule_identifiers.py holds 29 entries, not the 27 CONTEXT.md's D-04 states -- verified directly against every add()/register() call site (Settlement has 5 checks not 4, Boundary has 4); completeness of the freeze guarantee kept over matching the stated total.
+- [Phase 01]: Applied _nan_safe to all three new Settlement/Takeoffpoint/Boundary parity comparisons, extending plan 04's pattern to cover NaN cells arising from pd.concat column-union across per-rule detail frames, not only from a genuinely-null fixture cell.
+- [Phase 01]: Left run_ward_boundary_qc's raw checks-list emission order as B0, B1, B3, B2 (matching pre-extraction app.py exactly) rather than reordering add() calls to force B0/B1/B2/B3 directly; canonical_order() and the sort_by_registry-piped call site already deliver the required order.
 
 ### Pending Todos
 
@@ -107,6 +110,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-09T20:10:17.436Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-09-09T20:24:39.794Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
