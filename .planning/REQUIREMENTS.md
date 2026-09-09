@@ -39,7 +39,7 @@ Rule identity, state handling and the structural seam the new layers will be bui
 - [ ] **ENGINE-04**: Auto-correction runs exactly once per submission and produces the same output each time it is displayed, including generated `eha_guid` values — closes F5
 - [ ] **ENGINE-05**: All QC layers live in a `qc/` package containing no `import streamlit`, enforced by a test
 - [ ] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
-- [ ] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
+- [x] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
 - [ ] **ENGINE-08**: Raw-data report sheets are written without per-cell font and border assignment — closes F12
 - [ ] **ENGINE-09**: Rule emission order is deterministic across application restarts, so two reports over identical data can be diffed row-for-row — closes F10 (`YN_NA_COLS` is a set literal at `app.py:100` and Python randomises string hashing per process, so Rule 12's eight checks currently appear in a different order every restart)
 
@@ -172,7 +172,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | ENGINE-04 | Phase 2 | Pending |
 | ENGINE-05 | Phase 1 | Pending |
 | ENGINE-06 | Phase 2 | Pending |
-| ENGINE-07 | Phase 1 | Pending |
+| ENGINE-07 | Phase 1 | Complete |
 | ENGINE-08 | Phase 3 | Pending |
 | ENGINE-09 | Phase 1 | Pending |
 | DEPLOY-01 | Phase 4 | Pending |
@@ -216,6 +216,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | 7 | Geometry, Population and Coverage Layers | 8 |
 
 **Coverage:**
+
 - v1 requirements: 46 total
 - Mapped to phases: 46 ✓
 - Unmapped: 0

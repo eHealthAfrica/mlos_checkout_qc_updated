@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
 current_phase: 01
-current_phase_name: qc-engine-seam-and-pinned-environment
+current_phase_name: QC Engine Seam and Pinned Environment
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-09T18:48:44.358Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-09T19:20:09.767Z"
 last_activity: 2026-09-09
-last_activity_desc: Roadmap revised; ENGINE-09 added and mapped, 46 v1 requirements across 7 phases
-state_head: 6bddff276dc1d8e9f6a2307ff83abe09a814b9c3
+last_activity_desc: Phase 01 execution started
+state_head: e4c2ae5235e7c56a68ad102ecc60cafe95d838b7
 progress:
   total_phases: 7
   completed_phases: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-09)
 
 **Core value:** A file this tool calls clean is clean.
-**Current focus:** Phase 1 — QC Engine Seam and Pinned Environment
+**Current focus:** Phase 01 — QC Engine Seam and Pinned Environment
 
 ## Current Position
 
-Phase: 01 (qc-engine-seam-and-pinned-environment) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
+Phase: 01 (QC Engine Seam and Pinned Environment) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-09-09 — Roadmap revised; ENGINE-09 added and mapped, 46 v1 requirements across 7 phases
+Last activity: 2026-09-09 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -54,6 +54,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 25 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -68,6 +73,8 @@ Recent decisions affecting current work:
 - Roadmap: ENGINE-09 (F10, deterministic rule order) mapped to Phase 1, not the report layer. Verified in code: the `YN_NA_COLS` set literal at `app.py:100` is iterated at `app.py:946` to emit eight checks, all as `add("12", ...)` — so the same eight rows carry both the F3 identity defect and the F10 ordering defect. One registry fixes both.
 - PROJECT.md: Fix the 14 audited defects before adding any new layer.
 - PROJECT.md: Ship M2 (deployment) before M3 (new layers) — product choice, not a technical gate.
+- [Phase 01]: Package-legitimacy checkpoint (pandas 3.0.5, numpy>=2.0.0,<3.0.0, pytest>=8.0.0,<10.0.0) approved-with-evidence; all three SUS verdicts confirmed as PyPI metadata false positives (each publishes a real GitHub repository).
+- [Phase 01]: Created a project-local .venv (already gitignored) to work around macOS Homebrew's PEP 668 externally-managed-environment pip restriction; not a shipped project convention, just a local install path.
 
 ### Pending Todos
 
@@ -90,6 +97,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-09T17:02:52.985Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-qc-engine-seam-and-pinned-environment/01-CONTEXT.md
+Last session: 2026-09-09T19:20:09.754Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
