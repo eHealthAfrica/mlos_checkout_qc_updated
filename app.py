@@ -604,8 +604,19 @@ with st.sidebar:
 | 8 | habitational_status valid |
 | 9 | set_target ≤ set_population |
 | 10 | number_of_household ≤ set_population |
-| 11 | urban/rural/scattered = Y/N (no conflict) |
-| 12 | Profile flags = Y/N/NA (highrisk, slums, densely_populated, hard2reach, border, nomadic, riverine, fulani) |
+| 11.urban | urban is Y or N |
+| 11.rural | rural is Y or N |
+| 11.scattered | scattered is Y or N |
+| 11a | Cannot be both Urban and Rural |
+| 11b | Urban cannot be Scattered |
+| 12.highrisk | highrisk = Y/N/NA |
+| 12.slums | slums = Y/N/NA |
+| 12.densely_populated | densely_populated = Y/N/NA |
+| 12.hard2reach | hard2reach = Y/N/NA |
+| 12.border | border = Y/N/NA |
+| 12.nomadic | nomadic = Y/N/NA |
+| 12.riverine | riverine = Y/N/NA |
+| 12.fulani | fulani = Y/N/NA |
 | 13 | editor = firstname.surname (lowercase) |
 | 14 | eha_guid = valid UUID |
         """)
