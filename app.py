@@ -11,8 +11,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 import qc
-from qc.predicates import pct, vec_is_uuid, vec_is_editor
-from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS, FLAG_COLS
+from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
 
 # ─── Page Config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -357,94 +356,6 @@ Check-by-Check Summary:
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, TO + CC, msg.as_string())
-
-# ─── Auto Correction ─────────────────────────────────────────────────────────────
-def auto_correct_mlos(mlos: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
-    """
-    Apply auto-corrections to the MLoS DataFrame.
-    Returns a corrected copy and a log of changes made.
-    """
-    import uuid as _uuid
-    df  = mlos.copy()
-    log = []   # list of {Column, Correction, Rows Fixed}
-
-    # ── Correction 1: Flag columns NULL → "NA" ───────────────────────────────
-    for col in FLAG_COLS:
-        if col not in df.columns:
-            continue
-        mask = df[col].isna() | df[col].astype(str).str.strip().eq("")
-        n = int(mask.sum())
-        if n:
-            df.loc[mask, col] = "NA"
-            log.append({"Column": col,
-                        "Correction": "NULL → NA",
-                        "Rows Fixed": n})
-
-    # ── Correction 1b: scattered NULL or "NA" → "N" ─────────────────────────
-    if "scattered" in df.columns:
-        mask = (
-            df["scattered"].isna() |
-            df["scattered"].astype(str).str.strip().eq("") |
-            df["scattered"].astype(str).str.strip().eq("NA")
-        )
-        n = int(mask.sum())
-        if n:
-            df.loc[mask, "scattered"] = "N"
-            log.append({"Column": "scattered",
-                        "Correction": "NULL / NA → N",
-                        "Rows Fixed": n})
-
-    # ── Correction 2: Fully Accessible + NULL reason → "NA" ──────────────────
-    if "accessibility_status" in df.columns and "reasons_for_inaccessibility" in df.columns:
-        mask = (
-            df["accessibility_status"].astype(str).str.strip().eq("Fully Accessible") &
-            (df["reasons_for_inaccessibility"].isna() |
-             df["reasons_for_inaccessibility"].astype(str).str.strip().eq(""))
-        )
-        n = int(mask.sum())
-        if n:
-            df.loc[mask, "reasons_for_inaccessibility"] = "NA"
-            log.append({"Column": "reasons_for_inaccessibility",
-                        "Correction": "NULL → NA (Fully Accessible rows)",
-                        "Rows Fixed": n})
-
-    # ── Correction 3: source NULL / empty → "IE" ─────────────────────────────
-    if "source" in df.columns:
-        mask = df["source"].isna() | df["source"].astype(str).str.strip().eq("")
-        n = int(mask.sum())
-        if n:
-            df.loc[mask, "source"] = "IE"
-            log.append({"Column": "source",
-                        "Correction": "NULL / empty → IE",
-                        "Rows Fixed": n})
-
-    # ── Correction 4: eha_guid — strip braces then regenerate invalid UUIDs ──
-    if "eha_guid" in df.columns:
-        # Step 1: strip any { } characters
-        has_braces = df["eha_guid"].astype(str).str.contains(r"[\{\}]", na=False)
-        n_brace = int(has_braces.sum())
-        if n_brace:
-            df.loc[has_braces, "eha_guid"] = (
-                df.loc[has_braces, "eha_guid"]
-                  .astype(str).str.replace(r"[\{\}]", "", regex=True).str.strip()
-            )
-
-        # Step 2: generate a fresh UUID for any value still not a valid UUID
-        invalid_mask = ~vec_is_uuid(df["eha_guid"])
-        n_gen = int(invalid_mask.sum())
-        if n_gen:
-            df.loc[invalid_mask, "eha_guid"] = [
-                str(_uuid.uuid4()) for _ in range(n_gen)
-            ]
-
-        total_fixed = n_brace + n_gen
-        if total_fixed:
-            log.append({"Column": "eha_guid",
-                        "Correction": f"Braces removed ({n_brace} rows); UUID regenerated ({n_gen} rows)",
-                        "Rows Fixed": total_fixed})
-
-    return df, log
-
 
 def build_corrected_excel(df: pd.DataFrame) -> bytes:
     """Write the corrected MLoS DataFrame to an Excel file and return bytes."""
@@ -817,7 +728,7 @@ else:
 
         # ── Pre-step: Auto Correct ────────────────────────────────────────
         st.write("🔧 Pre-step — Auto Correct")
-        mlos_df, _ac_log = auto_correct_mlos(mlos_df)
+        mlos_df, _ac_log = qc.autocorrect.auto_correct_mlos(mlos_df)
         _n_fixed = sum(r["Rows Fixed"] for r in _ac_log)
         if _ac_log:
             st.write(f"   ✅ Auto Correct: {len(_ac_log)} correction(s) applied, {_n_fixed:,} row(s) fixed")
@@ -1057,7 +968,7 @@ with tab1:
     )
     st.markdown("---")
 
-    corrected_df, correction_log = auto_correct_mlos(mlos_df)
+    corrected_df, correction_log = qc.autocorrect.auto_correct_mlos(mlos_df)
 
     if not correction_log:
         st.success("✅ No corrections needed — all checked fields are already valid.")
