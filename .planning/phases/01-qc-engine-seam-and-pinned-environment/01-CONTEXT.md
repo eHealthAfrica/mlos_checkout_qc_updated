@@ -24,7 +24,7 @@ this phase's work.
 
 - **D-01:** The 11 checks currently sharing two numbers get **field-named suffixes**, not letter suffixes. Rule 11's three field checks become `11.urban`, `11.rural`, `11.scattered`. Rule 12's eight profile-flag checks become `12.highrisk`, `12.slums`, `12.densely_populated`, `12.hard2reach`, `12.border`, `12.nomadic`, `12.riverine`, `12.fulani`. — **Reversibility:** costly — the identifier is the join key between check records and detail rows, and it is printed in every on-screen summary table, every per-rule Excel sheet name, the emailed summary, and the sidebar rules-reference tables. Changing the scheme again means touching all of those plus any report the data team has filed in the interim.
 - **D-02:** Field-named suffixes were chosen over letters specifically because **`11a` and `11b` are already taken** by the two conflict rules ("Cannot be both Urban and Rural", "Urban cannot be Scattered"). A letter scheme would have forced either a meaningless grouping (field checks at `11c`–`11e`, conflict checks at `11a`/`11b`) or renumbering `11a`/`11b` and invalidating existing report references. The field-named scheme sidesteps both.
-- **D-03:** A secondary benefit, and part of why this was chosen: the identifier is self-describing. An officer reading `12.fulani` in a report knows which field failed without consulting the rules-reference table.
+- **D-03 [informational]:** A secondary benefit, and part of why this was chosen: the identifier is self-describing. An officer reading `12.fulani` in a report knows which field failed without consulting the rules-reference table.
 
 ### Existing Identifier Stability
 
