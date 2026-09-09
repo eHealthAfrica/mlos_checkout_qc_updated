@@ -10,6 +10,10 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+import qc
+from qc.predicates import pct, vec_is_uuid, vec_is_editor
+from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS, FLAG_COLS
+
 # ─── Page Config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="MLOS Checkout QC",
@@ -87,18 +91,6 @@ st.markdown("""
 # ─── Constants ───────────────────────────────────────────────────────────────────
 MLOS_VIEW    = "master_list_settlement_update_view"
 TAKEOFF_VIEW = "mlos_takeoffpoint_view"
-
-VALID_DAY   = {"1","1_2","1_2_3","1_2_3_4","2","2_3","2_3_4","3","3_4","4","NA"}
-VALID_YN_NA = {"Y","N","NA"}
-VALID_YN    = {"Y","N"}
-VALID_ACC   = {"Fully Accessible","Partially Accessible","Inaccessible"}
-VALID_HAB   = {"Abandoned","Migrated","Inhabited","Partially Inhabited"}
-UUID_RE     = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-EDITOR_RE   = re.compile(r'^[a-z]+\.[a-z]+$')
-# Nullable MLoS fields (can be null — not subject to null checks):
-# primarysettlement_name, alternate_name, reasons_for_inaccessibility
-YN_NA_COLS  = {"highrisk","slums","densely_populated","hard2reach","border",
-               "nomadic","riverine","fulani"}
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────────
 def load_sqlite(uploaded_file):
@@ -204,79 +196,7 @@ def get_uploaded_data(uploaded_file, progress=None):
     return mlos_df, takeoff_df
 
 
-def pct(v, t): return f"{v/t*100:.1f}%" if t else "0%"
-
-# Vectorized regex checks — avoid per-row Python function calls
-def vec_is_uuid(series: "pd.Series") -> "pd.Series":
-    s = series.astype(str).str.strip()
-    return s.str.match(UUID_RE.pattern, na=False)
-
-def vec_is_editor(series: "pd.Series") -> "pd.Series":
-    s = series.astype(str).str.strip()
-    return s.str.match(EDITOR_RE.pattern, na=False)
-
 # ─── Schema QC ───────────────────────────────────────────────────────────────────
-MLOS_REQUIRED_COLS = {
-    "state_code", "state_name", "lga_code", "lga_name", "ward_name", "ward_code",
-    "takeoffpoint", "takeoffpoint_code", "settlement_name", "primarysettlement_name",
-    "alternate_name", "latitude", "longitude", "security_compromised",
-    "accessibility_status", "reasons_for_inaccessibility", "habitational_status",
-    "set_population", "set_target", "number_of_household", "noncompliant_household",
-    "team_code", "day_of_activity", "urban", "rural", "highrisk", "slums",
-    "densely_populated", "hard2reach", "border", "nomadic", "scattered",
-    "riverine", "fulani", "timestamp", "source", "last_updated", "editor",
-    "validation_status", "master_id", "mlos_id", "eha_guid", "settlementarea_globalid",
-}
-TAKEOFF_REQUIRED_COLS = {"name", "code", "wardcode", "globalid"}
-
-def run_schema_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
-    """
-    Schema alignment QC — checks required columns are present.
-    Returns check entries (same format as run_mlos_qc) and a detail DataFrame.
-    Does NOT stop the QC process.
-    """
-    checks, details = [], []
-
-    mlos_cols    = set(mlos.columns.str.strip().str.lower())
-    missing_mlos = sorted(MLOS_REQUIRED_COLS - mlos_cols)
-    n_mlos_total = len(MLOS_REQUIRED_COLS)
-    n_mlos_miss  = len(missing_mlos)
-    checks.append({
-        "Rule#": "S1", "QC Check": "MLoS Schema Alignment",
-        "Description": f"{n_mlos_total - n_mlos_miss}/{n_mlos_total} required MLoS columns present",
-        "Failing Rows": n_mlos_miss, "Total Rows": n_mlos_total,
-        "Fail %": pct(n_mlos_miss, n_mlos_total),
-        "Status": "❌ FAIL" if n_mlos_miss else "✅ PASS",
-    })
-    if missing_mlos:
-        details.append(pd.DataFrame([{
-            "Rule#": "S1", "Rule": "MLoS Schema Alignment",
-            "Table": "MLoS", "Missing Column": col,
-            "Impact": "QC rule(s) referencing this column will be skipped or may return incorrect results",
-        } for col in missing_mlos]))
-
-    if not takeoff.empty and len(takeoff.columns) > 0:
-        tp_cols    = set(takeoff.columns.str.strip().str.lower())
-        missing_tp = sorted(TAKEOFF_REQUIRED_COLS - tp_cols)
-        n_tp_total = len(TAKEOFF_REQUIRED_COLS)
-        n_tp_miss  = len(missing_tp)
-        checks.append({
-            "Rule#": "S2", "QC Check": "Takeoffpoint Schema Alignment",
-            "Description": f"{n_tp_total - n_tp_miss}/{n_tp_total} required Takeoffpoint columns present",
-            "Failing Rows": n_tp_miss, "Total Rows": n_tp_total,
-            "Fail %": pct(n_tp_miss, n_tp_total),
-            "Status": "❌ FAIL" if n_tp_miss else "✅ PASS",
-        })
-        if missing_tp:
-            details.append(pd.DataFrame([{
-                "Rule#": "S2", "Rule": "Takeoffpoint Schema Alignment",
-                "Table": "Takeoffpoint", "Missing Column": col,
-                "Impact": "QC rule(s) referencing this column will be skipped or may return incorrect results",
-            } for col in missing_tp]))
-
-    schema_detail = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
-    return checks, schema_detail
-
 def build_schema_report_xlsx(schema_detail: pd.DataFrame) -> bytes:
     """Produce a downloadable Excel report listing schema mismatches."""
     out = BytesIO()
@@ -692,11 +612,6 @@ Check-by-Check Summary:
         server.sendmail(smtp_user, TO + CC, msg.as_string())
 
 # ─── Auto Correction ─────────────────────────────────────────────────────────────
-FLAG_COLS = [
-    "highrisk", "slums", "densely_populated", "hard2reach",
-    "border", "nomadic", "scattered", "riverine", "fulani",
-]
-
 def auto_correct_mlos(mlos: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
     """
     Apply auto-corrections to the MLoS DataFrame.
@@ -1376,7 +1291,8 @@ else:
         # ── Step 1 / 5: Schema Alignment ─────────────────────────────────
         qc_bar.progress(5, text="🔎 Step 1 / 5 — Schema Alignment…")
         st.write("🔎 Step 1 / 5 — Schema Alignment")
-        schema_checks, schema_detail = run_schema_qc(mlos_df, takeoff_df)
+        schema_checks, schema_detail = qc.schema.run_schema_qc(mlos_df, takeoff_df)
+        schema_checks = qc.sort_by_registry(schema_checks)
         schema_fail = sum(1 for c in schema_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if schema_fail else '✅'} Schema: "
                  f"{len(schema_checks) - schema_fail}/{len(schema_checks)} checks passed")
