@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: QC Engine Seam and Pinned Environment
-status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-09-09T20:24:39.808Z"
+status: verifying
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-09-09T21:17:48.523Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 01 execution started
-state_head: 391ad9170e6f777b9cf8f8b1cbe5bd294c6a04a8
+state_head: 3f26bf0eff9c6530f8657280a5e4d2dbd4930be2
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 
 Phase: 01 (QC Engine Seam and Pinned Environment) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-09 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P03 | 15min | 3 tasks | 9 files |
 | Phase 01 P04 | 15min | 3 tasks | 5 files |
 | Phase 01 P05 | 12min | 3 tasks | 6 files |
+| Phase 01 P06 | 40min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,9 @@ Recent decisions affecting current work:
 - [Phase 01]: [Phase 01] FROZEN_IDENTIFIERS in tests/test_rule_identifiers.py holds 29 entries, not the 27 CONTEXT.md's D-04 states -- verified directly against every add()/register() call site (Settlement has 5 checks not 4, Boundary has 4); completeness of the freeze guarantee kept over matching the stated total.
 - [Phase 01]: Applied _nan_safe to all three new Settlement/Takeoffpoint/Boundary parity comparisons, extending plan 04's pattern to cover NaN cells arising from pd.concat column-union across per-rule detail frames, not only from a genuinely-null fixture cell.
 - [Phase 01]: Left run_ward_boundary_qc's raw checks-list emission order as B0, B1, B3, B2 (matching pre-extraction app.py exactly) rather than reordering add() calls to force B0/B1/B2/B3 directly; canonical_order() and the sort_by_registry-piped call site already deliver the required order.
+- [Phase 01]: [Phase 01] Fixed a pre-existing test-isolation leak in tests/test_results_registry.py's duplicate-id tests (throwaway identifiers left registered in the shared process-global registry), exposed by plan 06's new exact-set-equality rules-reference/registry test.
+- [Phase 01]: [Phase 01] Plan 06 Task 2 committed as a genuine RED-then-GREEN pair (unlike this phase's earlier parity tests): the test required a real production-code change (expanding the MLoS sidebar reference table) to turn green, verified failing first.
+- [Phase 01]: [Phase 01] Plan 06 followed the plan's narrow dead-import cleanup scope in app.py (FLAG_COLS, pct, vec_is_uuid, vec_is_editor only), leaving other already-unused qc.domain imports untouched as out of the plan's declared scope.
 
 ### Pending Todos
 
@@ -110,6 +114,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-09T20:24:39.794Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-09-09T21:17:48.508Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None

@@ -33,15 +33,15 @@ A verdict must not depend on upload format, and a check must not pass because a 
 
 Rule identity, state handling and the structural seam the new layers will be built against.
 
-- [ ] **ENGINE-01**: Every check carries a rule identifier that is unique across all layers — closes F3
-- [ ] **ENGINE-02**: Rule identifier uniqueness is enforced when the rule registry is imported, and is covered by a standing test so the defect cannot reopen as the rule set grows
+- [x] **ENGINE-01**: Every check carries a rule identifier that is unique across all layers — closes F3
+- [x] **ENGINE-02**: Rule identifier uniqueness is enforced when the rule registry is imported, and is covered by a standing test so the defect cannot reopen as the rule set grows
 - [ ] **ENGINE-03**: Displayed data and computed checks always describe the same version of the submission, on the first render and on every subsequent rerun — closes F4
 - [ ] **ENGINE-04**: Auto-correction runs exactly once per submission and produces the same output each time it is displayed, including generated `eha_guid` values — closes F5
-- [ ] **ENGINE-05**: All QC layers live in a `qc/` package containing no `import streamlit`, enforced by a test
+- [x] **ENGINE-05**: All QC layers live in a `qc/` package containing no `import streamlit`, enforced by a test
 - [ ] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
 - [x] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
 - [ ] **ENGINE-08**: Raw-data report sheets are written without per-cell font and border assignment — closes F12
-- [ ] **ENGINE-09**: Rule emission order is deterministic across application restarts, so two reports over identical data can be diffed row-for-row — closes F10 (`YN_NA_COLS` is a set literal at `app.py:100` and Python randomises string hashing per process, so Rule 12's eight checks currently appear in a different order every restart)
+- [x] **ENGINE-09**: Rule emission order is deterministic across application restarts, so two reports over identical data can be diffed row-for-row — closes F10 (`YN_NA_COLS` is a set literal at `app.py:100` and Python randomises string hashing per process, so Rule 12's eight checks currently appear in a different order every restart)
 
 ### Deployment (M2)
 
@@ -166,15 +166,15 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | INTEG-02 | Phase 2 | Pending |
 | INTEG-03 | Phase 2 | Pending |
 | INTEG-04 | Phase 2 | Pending |
-| ENGINE-01 | Phase 1 | Pending |
-| ENGINE-02 | Phase 1 | Pending |
+| ENGINE-01 | Phase 1 | Complete |
+| ENGINE-02 | Phase 1 | Complete |
 | ENGINE-03 | Phase 2 | Pending |
 | ENGINE-04 | Phase 2 | Pending |
-| ENGINE-05 | Phase 1 | Pending |
+| ENGINE-05 | Phase 1 | Complete |
 | ENGINE-06 | Phase 2 | Pending |
 | ENGINE-07 | Phase 1 | Complete |
 | ENGINE-08 | Phase 3 | Pending |
-| ENGINE-09 | Phase 1 | Pending |
+| ENGINE-09 | Phase 1 | Complete |
 | DEPLOY-01 | Phase 4 | Pending |
 | DEPLOY-02 | Phase 4 | Pending |
 | DEPLOY-03 | Phase 4 | Pending |
