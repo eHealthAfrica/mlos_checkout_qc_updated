@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: QC Engine Seam and Pinned Environment
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-09T19:20:09.767Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-09T19:39:57.754Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 01 execution started
-state_head: e4c2ae5235e7c56a68ad102ecc60cafe95d838b7
+state_head: 311b35c58cad406051ffc5c564761be1b4dba943
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
+  completed_plans: 2
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 01 (QC Engine Seam and Pinned Environment) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-09-09 — Phase 01 execution started
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 25 min | 2 tasks | 4 files |
+| Phase 01 P02 | 17min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,8 @@ Recent decisions affecting current work:
 - PROJECT.md: Ship M2 (deployment) before M3 (new layers) — product choice, not a technical gate.
 - [Phase 01]: Package-legitimacy checkpoint (pandas 3.0.5, numpy>=2.0.0,<3.0.0, pytest>=8.0.0,<10.0.0) approved-with-evidence; all three SUS verdicts confirmed as PyPI metadata false positives (each publishes a real GitHub repository).
 - [Phase 01]: Created a project-local .venv (already gitignored) to work around macOS Homebrew's PEP 668 externally-managed-environment pip restriction; not a shipped project convention, just a local install path.
+- [Phase 01]: Row 1's timestamp cell is a deliberate Python None, not a string, since app.py's rule-1 null check only catches real NaN/None via .isnull(), not empty strings. — Documented as the sole exception to 'every cell is a string' in tests/fixtures.py's module docstring.
+- [Phase 01]: Reordered tests/fixtures.py's Takeoffpoint columns to put globalid first, not name, to avoid a pre-existing app.py column-duplication bug in run_takeoff_qc's BASE list construction. — Real app.py behavior unrelated to TP2-TP5 rules under test; fixture column order isn't pinned by acceptance criteria (set match only).
 
 ### Pending Todos
 
@@ -97,6 +100,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-09T19:20:09.754Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-09T19:39:57.741Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

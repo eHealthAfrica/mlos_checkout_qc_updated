@@ -90,16 +90,16 @@ Item in REQUIREMENTS.md).
   4. A clean `pip install -r requirements.txt` resolves reproducibly to `pandas==3.0.5` with `numpy` explicitly declared and upper-bounded
   5. Two runs over identical data in separate processes emit checks in byte-identical order — the eight Rule 12 profile-flag checks included — so two reports can be diffed row-for-row
 
-**Plans**: 0/6 plans executed
+**Plans**: 2/6 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Pin the dependency set (pandas 3.0.5, numpy declared and bounded) and stand up the pytest harness
+- [x] 01-01-PLAN.md — Pin the dependency set (pandas 3.0.5, numpy declared and bounded) and stand up the pytest harness
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — Build the fixture corpus and capture the frozen pre-extraction behaviour baseline
+- [x] 01-02-PLAN.md — Build the fixture corpus and capture the frozen pre-extraction behaviour baseline
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -229,7 +229,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. QC Engine Seam and Pinned Environment | 0/6 | Planned    |  |
+| 1. QC Engine Seam and Pinned Environment | 2/6 | In Progress|  |
 | 2. Detection Correctness and Three-Format Harness | 0/TBD | Not started | - |
 | 3. Verdict and Report Integrity | 0/TBD | Not started | - |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
