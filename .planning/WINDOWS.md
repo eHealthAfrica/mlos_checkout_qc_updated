@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 1
+open_count: 0
 waived_count: 0
-fixed_count: 0
+fixed_count: 1
 total_count: 1
-last_updated: 2026-09-09T19:51:35.763Z
+last_updated: 2026-09-09T20:07:50.683Z
 ---
 
 # Broken Windows Ledger
@@ -15,7 +15,7 @@ last_updated: 2026-09-09T19:51:35.763Z
 
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
-| 1 | 01 | deviation | app.py |  | Task 1 acceptance criterion 'grep -c VALID_ACC app.py reports 1' is structurally unsatisfiable within this plan's declared scope: run_mlos_qc (relocates in plan 04) still uses VALID_ACC in app.py, so grep -c reports 2 (import line + usage line), same as the pre-refactor baseline. | open |  | 2026-09-09T19:51:35.763Z |  |
+| 1 | 01 | deviation | app.py |  | Task 1 acceptance criterion 'grep -c VALID_ACC app.py reports 1' is structurally unsatisfiable within this plan's declared scope: run_mlos_qc (relocates in plan 04) still uses VALID_ACC in app.py, so grep -c reports 2 (import line + usage line), same as the pre-refactor baseline. | fixed |  | 2026-09-09T19:51:35.763Z | 2026-09-09T20:07:50.683Z |
 
 ````json
 [
@@ -26,10 +26,10 @@ last_updated: 2026-09-09T19:51:35.763Z
     "file": "app.py",
     "line": null,
     "description": "Task 1 acceptance criterion 'grep -c VALID_ACC app.py reports 1' is structurally unsatisfiable within this plan's declared scope: run_mlos_qc (relocates in plan 04) still uses VALID_ACC in app.py, so grep -c reports 2 (import line + usage line), same as the pre-refactor baseline.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-09T19:51:35.763Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-09T20:07:50.683Z"
   }
 ]
 ````

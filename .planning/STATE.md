@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: QC Engine Seam and Pinned Environment
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-09-09T19:53:39.034Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-09-09T20:10:17.452Z"
 last_activity: 2026-09-09
 last_activity_desc: Phase 01 execution started
-state_head: 120de1dcaa60fe161c42922a7c7008d492f788e7
+state_head: 763a24b0dafa24ab64e64cc8dc525e1dfab0c471
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 01 (QC Engine Seam and Pinned Environment) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-09-09 — Phase 01 execution started
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P01 | 25 min | 2 tasks | 4 files |
 | Phase 01 P02 | 17min | 3 tasks | 5 files |
 | Phase 01 P03 | 15min | 3 tasks | 9 files |
+| Phase 01 P04 | 15min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Reordered tests/fixtures.py's Takeoffpoint columns to put globalid first, not name, to avoid a pre-existing app.py column-duplication bug in run_takeoff_qc's BASE list construction. — Real app.py behavior unrelated to TP2-TP5 rules under test; fixture column order isn't pinned by acceptance criteria (set match only).
 - [Phase 01]: sys.meta_path finders must implement find_spec, not find_module, under CPython 3.13 — verified empirically before writing the qc/ import-boundary subprocess test.
 - [Phase 01]: qc/ package cut through the Schema layer as the phase's tracer slice: registry (qc/results.py), relocated constants/predicates/schema, and app.py now calls qc.schema.run_schema_qc + qc.sort_by_registry at the real call site.
+- [Phase 01]: [Phase 01] Unrolled R11's loop into three explicit per-column add() calls (urban/rural/scattered) so the literal identifier appears in both the register() call and the emission path, satisfying the plan's grep-based acceptance criterion; R12's loop over YN_NA_COLS stays a genuine loop per the plan's key_links.
+- [Phase 01]: [Phase 01] FROZEN_IDENTIFIERS in tests/test_rule_identifiers.py holds 29 entries, not the 27 CONTEXT.md's D-04 states -- verified directly against every add()/register() call site (Settlement has 5 checks not 4, Boundary has 4); completeness of the freeze guarantee kept over matching the stated total.
 
 ### Pending Todos
 
@@ -104,6 +107,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-09T19:53:39.020Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-09-09T20:10:17.436Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
