@@ -29,7 +29,7 @@ fixed once, in one place, rather than repeatedly per feature.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: QC Engine Seam and Pinned Environment** - Unique rule identity, stable rule order, one pure `qc/` package, one known dependency set
+- [x] **Phase 1: QC Engine Seam and Pinned Environment** - Unique rule identity, stable rule order, one pure `qc/` package, one known dependency set (completed 2026-09-10)
 - [ ] **Phase 2: Detection Correctness and Three-Format Harness** - Same data, same findings, whatever format it arrived in
 - [ ] **Phase 3: Verdict and Report Integrity** - Verdict, score, report and email describe every layer that ran
 - [ ] **Phase 4: Central Deployment and Officer Identity** - One private Space URL, signed-in officers, no committed credentials
@@ -229,7 +229,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. QC Engine Seam and Pinned Environment | 6/6 | In Progress|  |
+| 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
 | 2. Detection Correctness and Three-Format Harness | 0/TBD | Not started | - |
 | 3. Verdict and Report Integrity | 0/TBD | Not started | - |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
