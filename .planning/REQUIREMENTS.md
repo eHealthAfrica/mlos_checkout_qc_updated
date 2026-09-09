@@ -41,6 +41,7 @@ Rule identity, state handling and the structural seam the new layers will be bui
 - [ ] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
 - [ ] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
 - [ ] **ENGINE-08**: Raw-data report sheets are written without per-cell font and border assignment — closes F12
+- [ ] **ENGINE-09**: Rule emission order is deterministic across application restarts, so two reports over identical data can be diffed row-for-row — closes F10 (`YN_NA_COLS` is a set literal at `app.py:100` and Python randomises string hashing per process, so Rule 12's eight checks currently appear in a different order every restart)
 
 ### Deployment (M2)
 
@@ -151,16 +152,87 @@ Explicitly excluded, with reasoning, to prevent re-adding.
 
 ## Traceability
 
-Filled in during roadmap creation.
+Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (all v1 requirements) | Unmapped | Pending |
+| VERDICT-01 | Phase 3 | Pending |
+| VERDICT-02 | Phase 3 | Pending |
+| VERDICT-03 | Phase 3 | Pending |
+| VERDICT-04 | Phase 3 | Pending |
+| VERDICT-05 | Phase 3 | Pending |
+| VERDICT-06 | Phase 3 | Pending |
+| INTEG-01 | Phase 2 | Pending |
+| INTEG-02 | Phase 2 | Pending |
+| INTEG-03 | Phase 2 | Pending |
+| INTEG-04 | Phase 2 | Pending |
+| ENGINE-01 | Phase 1 | Pending |
+| ENGINE-02 | Phase 1 | Pending |
+| ENGINE-03 | Phase 2 | Pending |
+| ENGINE-04 | Phase 2 | Pending |
+| ENGINE-05 | Phase 1 | Pending |
+| ENGINE-06 | Phase 2 | Pending |
+| ENGINE-07 | Phase 1 | Pending |
+| ENGINE-08 | Phase 3 | Pending |
+| ENGINE-09 | Phase 1 | Pending |
+| DEPLOY-01 | Phase 4 | Pending |
+| DEPLOY-02 | Phase 4 | Pending |
+| DEPLOY-03 | Phase 4 | Pending |
+| DEPLOY-04 | Phase 4 | Pending |
+| AUTH-01 | Phase 4 | Pending |
+| AUTH-02 | Phase 4 | Pending |
+| AUTH-03 | Phase 4 | Pending |
+| AUDIT-01 | Phase 5 | Pending |
+| AUDIT-02 | Phase 5 | Pending |
+| AUDIT-03 | Phase 5 | Pending |
+| AUDIT-04 | Phase 5 | Pending |
+| AUDIT-05 | Phase 5 | Pending |
+| CONFIG-01 | Phase 6 | Pending |
+| CONFIG-02 | Phase 6 | Pending |
+| CONFIG-03 | Phase 6 | Pending |
+| GEO-01 | Phase 7 | Pending |
+| GEO-02 | Phase 7 | Pending |
+| GEO-03 | Phase 7 | Pending |
+| GEO-04 | Phase 7 | Pending |
+| GEO-05 | Phase 7 | Pending |
+| POP-01 | Phase 7 | Pending |
+| POP-02 | Phase 7 | Pending |
+| TEAM-01 | Phase 7 | Pending |
+| ADVIS-01 | Phase 6 | Pending |
+| ADVIS-02 | Phase 6 | Pending |
+| ADVIS-03 | Phase 6 | Pending |
+| ADVIS-04 | Phase 6 | Pending |
+
+**Phase summary:**
+
+| Phase | Name | Requirements |
+|-------|------|--------------|
+| 1 | QC Engine Seam and Pinned Environment | 5 |
+| 2 | Detection Correctness and Three-Format Harness | 7 |
+| 3 | Verdict and Report Integrity | 7 |
+| 4 | Central Deployment and Officer Identity | 7 |
+| 5 | Submission Record | 5 |
+| 6 | Threshold Configuration and Advisory Severity | 7 |
+| 7 | Geometry, Population and Coverage Layers | 8 |
 
 **Coverage:**
-- v1 requirements: 45 total
-- Mapped to phases: 0
-- Unmapped: 45 ⚠️ (expected — roadmap not yet created)
+- v1 requirements: 46 total
+- Mapped to phases: 46 ✓
+- Unmapped: 0
+- Duplicated across phases: 0
+
+Not mapped by design: v1.x (POP-03, POP-04, TEAM-02, TEAM-03) and v2 (HIST-01, HIST-02, ACL-01).
+
+**Audited defect coverage:** all 14 defects from the 2026-09-09 audit (F1–F14) now have at least
+one closing requirement, and no defect is split across phases. F10 was the last gap, closed by
+ENGINE-09 and mapped to Phase 1 — the report-ordering symptom surfaces in the report layer, but
+the cause is a set literal in the rule definitions, so it is fixed by the same registry that
+enforces ENGINE-01/ENGINE-02.
+
+Thirteen defects map one-to-one. The exception is **F1, which has two closing requirements** —
+VERDICT-01 (the report contains sheets for all five layers) and VERDICT-02 (the cover verdict
+derives from all five). These are two separable properties of one defect, both in Phase 3, so the
+split costs nothing. Every *requirement* still belongs to exactly one phase.
 
 ## Open Items
 
