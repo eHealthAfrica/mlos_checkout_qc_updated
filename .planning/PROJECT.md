@@ -28,7 +28,8 @@ defects inside several of them, and M1 corrects those without removing the capab
 
 - ✓ Loads MLoS and Takeoffpoint data from SQLite views, Excel workbooks (sheet-name aliasing) and CSV — existing
 - ✓ Accepts a separately uploaded Takeoffpoint file to enable cross-table checks for CSV submissions — existing
-- ✓ Runs 27 QC rules across five layers: Schema (S1–S2), MLoS (1–14), Settlement (SQ1–SQ4), Takeoffpoint (TP2–TP5), Boundary (B0–B3) — existing
+- ✓ Runs QC rules across five layers: Schema (S1–S2), MLoS (1–14), Settlement (SQ1–SQ4 incl. SQ2b), Takeoffpoint (TP2–TP5), Boundary (B0–B3) — existing
+  (29 distinct identifiers pre-M1, not the 27 stated at initialization; 40 after Phase 1 split Rules 11 and 12 into field-named checks)
 - ✓ Auto-corrects five field patterns before QC and logs what it changed — existing
 - ✓ Validates ward codes, coordinates and state names against a 9,410-ward admin boundary reference — existing
 - ✓ Produces a weighted QC score across the five layers — existing
@@ -37,6 +38,14 @@ defects inside several of them, and M1 corrects those without removing the capab
 - ✓ Downloadable auto-corrected MLoS file for re-submission — existing
 - ✓ Emails a QC summary to the data team over SMTP — existing
 
+**Shipped by M1:**
+
+- ✓ Every check carries a rule identifier naming exactly one check; the 11 checks that shared Rules 11 and 12 now carry field-named identifiers (`11.urban`, `12.fulani`, …) and the other 29 are frozen (F3) — Phase 1
+- ✓ Duplicate rule identifiers fail at import of the `qc/` registry, named in the error, asserted by a standing test (F3) — Phase 1
+- ✓ Report row order reproducible across app restarts, proven by a subprocess test comparing raw bytes under three differing `PYTHONHASHSEED` values (F10) — Phase 1
+- ✓ All five QC layers extracted to a `qc/` package that imports with Streamlit absent, enforced by a test — Phase 1
+- ✓ Dependencies pinned with upper bounds; `pandas==3.0.5` exact and `numpy` explicitly declared — Phase 1
+
 ### Active
 
 **M1 — Trustworthy verdict.** Close the 14 audited defects, then build the seam that lets the
@@ -44,20 +53,17 @@ rule set grow safely. Full audit: https://claude.ai/code/artifact/683128cf-bca1-
 
 - [ ] Downloaded QC report covers all five layers, with its cover verdict derived from all of them (F1 — currently 2 of 5, so a failing file can download as "CLEAN")
 - [ ] Rule 1 detects missing values identically across SQLite, CSV and Excel (F2 — currently cannot fail on CSV or Excel)
-- [ ] Every check carries a rule number that identifies exactly one check (F3 — 11 checks currently share 2 numbers)
 - [ ] One frame of record: displayed data and computed checks never describe different versions of the file (F4)
 - [ ] Auto-correction runs once, deterministically — no regenerated GUIDs between QC and download (F5)
 - [ ] Weighted score never rises because data was withheld (F6 — absent layers currently score 100%)
 - [ ] Column names normalised once at load, so schema alignment and the rules agree on what a column is called (F7)
 - [ ] Issue-row counts report distinct rows, not rule-row pairs (F8)
 - [ ] Blank values cannot satisfy cross-table match rules (F9 — affects R2/R3/R4 and TP2/TP3/TP4)
-- [ ] Report row order reproducible across app restarts (F10)
 - [ ] Email summary covers all five layers, including Settlement (F11)
 - [ ] Raw-data report sheets written without per-cell styling (F12)
 - [ ] Boundary reference fallback surfaces as a visible warning instead of silently widening to all states (F13)
 - [ ] Boundary checks emitted in rule order B0, B1, B2, B3 (F14)
-- [ ] Pure QC functions extracted to a `qc/` package with a pytest suite covering all rules and a three-format golden fixture
-- [ ] Dependencies pinned; `numpy` declared explicitly
+- [ ] pytest suite covering all rules, with a three-format golden fixture (`qc/` package and harness landed in Phase 1; rule-complete coverage and the .sqlite/.csv/.xlsx fixture remain)
 
 **M2 — Central deployment.** Get it into officers' hands before growing the rule set.
 
@@ -131,7 +137,7 @@ F2 and F9 are unhandled consequences of it, not reasons to reverse it.
 | OIDC login; no passwords stored | Reduces the governance surface from "we hold state officers' credentials" to "we hold a list of who ran a check." | — Pending |
 | Private HF Dataset repo for the submission log | Keeps the whole deployment on one platform with one credential set, and gives git-versioned history for free. No external database to operate or monitor for idle-pausing. | — Pending |
 | Longitudinal layer deferred to v2 | The only proposed layer requiring retained submission history. Deferring it keeps the QC engine stateless, which is the largest available simplification. | — Pending |
-| Extract to `qc/` + pytest inside M1, not M3 | Three new layers means substantial new rule code. There is currently no seam to add it against and nothing to catch a regression. | — Pending |
+| Extract to `qc/` + pytest inside M1, not M3 | Three new layers means substantial new rule code. There is currently no seam to add it against and nothing to catch a regression. | Done — Phase 1. Five layers behind `qc/`, 310 lines out of `app.py`, 34 standing tests, every relocation checked against a frozen pre-extraction baseline. |
 | Ship M2 (deployment) before M3 (new layers) | Officers get a trustworthy tool sooner. Holding deployment back for more rules delays the value M1 creates. | — Pending |
 
 ## Open Items
@@ -139,6 +145,7 @@ F2 and F9 are unhandled consequences of it, not reasons to reverse it.
 Recorded rather than resolved. Neither blocks planning M1.
 
 - **Threshold values** for population plausibility and team coverage — to be supplied by the user, destined for `config.json`. Needed before M3 is planned.
+- **Python 3.11 floor** — `pandas==3.0.5` declares `requires-python: >=3.11`. Recorded in `requirements.txt` and not enforced beyond that; the Hugging Face Space must meet it. An M2 (Phase 4) deployment concern, discovered in Phase 1.
 - **OIDC provider choice** — Spaces support native Hugging Face OAuth (`hf_oauth: true` in Space metadata), which avoids registering Google Cloud OAuth credentials and managing a redirect URI. Whether officers signing in with HF accounts is acceptable is an M2 planning question. Both paths remain open.
 
 ## Evolution
@@ -159,4 +166,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-09 after initialization*
+*Last updated: 2026-09-10 after Phase 1*
