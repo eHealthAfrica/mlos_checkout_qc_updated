@@ -8,6 +8,7 @@ re-sort helper every layer's call site pipes its checks through.
 """
 
 from . import schema
+from . import mlos
 from .results import Rule, register, canonical_order
 
 
