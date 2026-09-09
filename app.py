@@ -299,259 +299,6 @@ def load_boundary_refs():
             bbox_df[col] = pd.to_numeric(bbox_df[col], errors="coerce")
     return ref_df, bbox_df
 
-# ─── QC Engine — Ward Boundary ───────────────────────────────────────────────────
-def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.DataFrame):
-    checks, details = [], []
-    total = len(mlos)
-
-    if "ward_code" not in mlos.columns:
-        checks.append({
-            "Rule#": "B0", "QC Check": "Ward Code — Not Available on Data",
-            "Description": "ward_code column is missing from the uploaded data — all boundary checks skipped",
-            "Failing Rows": total, "Total Rows": total,
-            "Fail %": "100.0%",
-            "Status": "❌ FAIL",
-        })
-        return checks, pd.DataFrame()
-
-    id_col = "ogc_fid" if "ogc_fid" in mlos.columns else mlos.columns[0]
-    BASE   = [c for c in [id_col,"state_name","lga_name","ward_code","settlement_name"] if c in mlos.columns]
-
-    def add(num, rule, desc, mask, extra=None):
-        n    = int(mask.sum())
-        cols = BASE + [c for c in (extra or []) if c in mlos.columns and c not in BASE]
-        checks.append({"Rule#": num, "QC Check": rule, "Description": desc,
-                        "Failing Rows": n, "Total Rows": total,
-                        "Fail %": pct(n, total),
-                        "Status": "❌ FAIL" if n else "✅ PASS"})
-        if n:
-            sub = mlos[mask][cols].copy()
-            sub.insert(0, "Rule#", num)
-            sub.insert(1, "Rule", rule)
-            details.append(sub)
-
-    # ── Filter boundary reference by state_name (case-insensitive).
-    # state_name ("Nasarawa", "Kano", etc.) is a plain readable string shared
-    # by both the MLoS data and the boundary reference — no format ambiguity.
-    # This replaces state_code filtering which caused false positives because
-    # "NA" (Nasarawa's code) is silently converted to NaN by pandas.
-    filtered_ref  = ref_df.copy()  if not ref_df.empty  else ref_df
-    filtered_bbox = bbox_df.copy() if not bbox_df.empty else bbox_df
-
-    if (not ref_df.empty
-            and "state_name" in mlos.columns
-            and "state_name" in ref_df.columns):
-        mlos_state_names = set(
-            mlos["state_name"].dropna().astype(str).str.strip().str.lower()
-        )
-        ref_sn_norm  = ref_df["state_name"].astype(str).str.strip().str.lower()
-        filtered_ref = filtered_ref[ref_sn_norm.isin(mlos_state_names)]
-
-        if not filtered_ref.empty and not filtered_bbox.empty and "ward_code" in filtered_bbox.columns:
-            state_ward_set = set(filtered_ref["ward_code"].dropna().astype(str).str.strip())
-            filtered_bbox  = filtered_bbox[
-                filtered_bbox["ward_code"].astype(str).str.strip().isin(state_ward_set)
-            ]
-
-    # Fallback to full reference if state_name filtering yields nothing
-    if filtered_ref.empty and not ref_df.empty:
-        filtered_ref  = ref_df.copy()
-        filtered_bbox = bbox_df.copy()
-
-    # B0 — ward_code must not be null or empty in the uploaded data
-    null_wc_mask = mlos["ward_code"].isna() | mlos["ward_code"].astype(str).str.strip().eq("")
-    add("B0", "Ward Code — Not Available on Data",
-        "ward_code is null or empty on the uploaded data",
-        null_wc_mask, ["ward_code"])
-
-    # B1 — non-null ward_codes must exist in the state-name-filtered boundary reference
-    if not filtered_ref.empty and "ward_code" in filtered_ref.columns:
-        valid_wards   = set(filtered_ref["ward_code"].dropna().astype(str).str.strip())
-        has_wc        = ~null_wc_mask   # only check rows that actually have a ward_code
-        not_in_ref    = ~mlos["ward_code"].astype(str).str.strip().isin(valid_wards)
-        add("B1", "Ward Code — Boundary Reference",
-            "ward_code must exist in the admin ward boundary reference for the file's state(s)",
-            has_wc & not_in_ref,
-            ["ward_code"])
-
-    # B3 — state_name in MLoS must match the state_name the boundary reference
-    # assigns to the same ward_code (catches ward codes registered to a different state)
-    if (not ref_df.empty
-            and "ward_code" in ref_df.columns
-            and "state_name" in ref_df.columns
-            and "state_name" in mlos.columns
-            and "ward_code" in mlos.columns):
-        ref_sn_map = (
-            ref_df[["ward_code", "state_name"]]
-            .drop_duplicates("ward_code")
-            .rename(columns={"state_name": "_ref_state_name"})
-        )
-        chk_sn = pd.DataFrame({
-            "ward_code":  mlos["ward_code"].astype(str).str.strip().values,
-            "_mlos_sn":   mlos["state_name"].astype(str).str.strip().str.lower().values,
-        }, index=mlos.index)
-        merged_sn = chk_sn.merge(ref_sn_map, on="ward_code", how="left")
-        merged_sn.index = mlos.index
-        merged_sn["_ref_sn_lower"] = merged_sn["_ref_state_name"].astype(str).str.strip().str.lower()
-        # Only flag rows where the ward_code IS found in the reference but the state_name differs
-        ward_found  = merged_sn["_ref_state_name"].notna()
-        sn_mismatch = merged_sn["_mlos_sn"] != merged_sn["_ref_sn_lower"]
-        mask_b3 = ward_found & sn_mismatch
-        add("B3", "State Name — Boundary Reference Match",
-            "state_name in MLoS must match the state_name assigned to the ward_code in the boundary reference",
-            mask_b3, ["ward_code", "state_name"])
-
-    # B2 — lat/lon must fall within the state-filtered bounding box
-    if (not filtered_bbox.empty and "ward_code" in filtered_bbox.columns
-            and "latitude" in mlos.columns and "longitude" in mlos.columns):
-        chk = pd.DataFrame({
-            "ward_code": mlos["ward_code"].astype(str).str.strip().values,
-            "lat":       pd.to_numeric(mlos["latitude"],  errors="coerce").values,
-            "lon":       pd.to_numeric(mlos["longitude"], errors="coerce").values,
-        }, index=mlos.index)
-
-        bbox_ref = filtered_bbox[["ward_code","min_lon","min_lat","max_lon","max_lat"]].copy()
-        for col in ["min_lon","min_lat","max_lon","max_lat"]:
-            bbox_ref[col] = pd.to_numeric(bbox_ref[col], errors="coerce")
-
-        merged = chk.merge(bbox_ref, on="ward_code", how="left")
-        merged.index = mlos.index
-
-        has_coords   = merged["lat"].notna() & merged["lon"].notna() & (merged["lat"] != 0) & (merged["lon"] != 0)
-        in_reference = merged["min_lon"].notna()
-        out_of_box   = (
-            (merged["lon"] < merged["min_lon"]) |
-            (merged["lon"] > merged["max_lon"]) |
-            (merged["lat"] < merged["min_lat"]) |
-            (merged["lat"] > merged["max_lat"])
-        )
-        mask_b2 = has_coords & in_reference & out_of_box
-        add("B2", "Coordinates — Ward Boundary Intersection",
-            "latitude/longitude must fall within the bounding box of the declared ward_code "
-            "(ward_code of the intersecting boundary must equal the declared ward_code)",
-            mask_b2, ["ward_code","latitude","longitude"])
-
-        # Enrich B2 detail with reverse-lookup: which ward bbox contains the failing coordinate
-        if mask_b2.any() and details:
-            _b2_detail = details[-1]
-            _bbox_lkp = filtered_bbox[["ward_code","min_lon","min_lat","max_lon","max_lat"]].copy()
-            for _c in ["min_lon","min_lat","max_lon","max_lat"]:
-                _bbox_lkp[_c] = pd.to_numeric(_bbox_lkp[_c], errors="coerce")
-            _bbox_lkp = _bbox_lkp.dropna()
-            _matched = []
-            for _idx in mask_b2[mask_b2].index:
-                _lv = pd.to_numeric(mlos.at[_idx, "latitude"],  errors="coerce")
-                _lnv = pd.to_numeric(mlos.at[_idx, "longitude"], errors="coerce")
-                if pd.isna(_lv) or pd.isna(_lnv):
-                    _matched.append("N/A")
-                    continue
-                _hits = _bbox_lkp[
-                    (_bbox_lkp["min_lon"] <= _lnv) & (_lnv <= _bbox_lkp["max_lon"]) &
-                    (_bbox_lkp["min_lat"] <= _lv)  & (_lv  <= _bbox_lkp["max_lat"])
-                ]["ward_code"].astype(str).tolist()
-                _matched.append(", ".join(_hits[:5]) if _hits else "No matching ward found")
-            _b2_detail["Intersecting Ward(s) from Boundary"] = _matched
-
-    detail_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
-    return checks, detail_df
-
-# ─── QC Engine — Settlement ──────────────────────────────────────────────────────
-def run_settlement_qc(mlos: pd.DataFrame):
-    import numpy as np
-    checks, details = [], []
-    total  = len(mlos)
-    id_col = "ogc_fid" if "ogc_fid" in mlos.columns else mlos.columns[0]
-    BASE   = [c for c in [id_col,"state_name","lga_name","ward_code","settlement_name"]
-              if c in mlos.columns]
-
-    def add(num, rule, desc, mask, extra=None):
-        n    = int(mask.sum())
-        cols = BASE + [c for c in (extra or []) if c in mlos.columns and c not in BASE]
-        checks.append({"Rule#": num, "QC Check": rule, "Description": desc,
-                       "Failing Rows": n, "Total Rows": total,
-                       "Fail %": pct(n, total),
-                       "Status": "❌ FAIL" if n else "✅ PASS"})
-        if n:
-            sub = mlos[mask][cols].copy()
-            sub.insert(0, "Rule#", num)
-            sub.insert(1, "Rule", rule)
-            details.append(sub)
-
-    # SQ1 — settlement_name must be unique within each ward_code
-    if "settlement_name" in mlos.columns and "ward_code" in mlos.columns:
-        add("SQ1", "Duplicate Settlement Name in Ward",
-            "settlement_name must not repeat within the same ward_code",
-            mlos.duplicated(subset=["ward_code", "settlement_name"], keep=False),
-            ["ward_code", "settlement_name"])
-
-    # SQ2 — latitude and longitude must not be null
-    if "latitude" in mlos.columns and "longitude" in mlos.columns:
-        lat = pd.to_numeric(mlos["latitude"],  errors="coerce")
-        lon = pd.to_numeric(mlos["longitude"], errors="coerce")
-        add("SQ2", "Latitude/Longitude — Not Null",
-            "latitude and longitude must not be null or missing",
-            lat.isna() | lon.isna(),
-            ["latitude", "longitude"])
-
-    # SQ2b — latitude and longitude must not be zero (where non-null)
-    if "latitude" in mlos.columns and "longitude" in mlos.columns:
-        lat = pd.to_numeric(mlos["latitude"],  errors="coerce")
-        lon = pd.to_numeric(mlos["longitude"], errors="coerce")
-        has_value = lat.notna() & lon.notna()
-        add("SQ2b", "Latitude/Longitude — Not Zero",
-            "latitude and longitude must not be zero",
-            has_value & ((lat == 0) | (lon == 0)),
-            ["latitude", "longitude"])
-
-    # SQ3 — no two settlements may share identical coordinates (stacked)
-    if "latitude" in mlos.columns and "longitude" in mlos.columns:
-        lat = pd.to_numeric(mlos["latitude"],  errors="coerce")
-        lon = pd.to_numeric(mlos["longitude"], errors="coerce")
-        valid = lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
-        coord_df   = pd.DataFrame({"_lat": lat, "_lon": lon})
-        stacked    = coord_df[valid].duplicated(keep=False)
-        mask_sq3   = pd.Series(False, index=mlos.index)
-        mask_sq3[stacked[stacked].index] = True
-        add("SQ3", "Stacked Coordinates",
-            "no two settlements may share identical latitude/longitude coordinates",
-            mask_sq3, ["latitude", "longitude"])
-
-    # SQ4 — every settlement must be > 30 m from every other settlement
-    if "latitude" in mlos.columns and "longitude" in mlos.columns:
-        lat = pd.to_numeric(mlos["latitude"],  errors="coerce")
-        lon = pd.to_numeric(mlos["longitude"], errors="coerce")
-        valid     = lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
-        valid_idx = mlos.index[valid]
-        mask_sq4  = pd.Series(False, index=mlos.index)
-
-        if len(valid_idx) > 1:
-            R      = 6371000.0           # Earth radius in metres
-            lats_r = np.radians(lat[valid].values)
-            lons_r = np.radians(lon[valid].values)
-            n      = len(lats_r)
-            too_close = set()
-
-            for i in range(n - 1):
-                dlat = lats_r[i] - lats_r[i + 1:]
-                dlon = lons_r[i] - lons_r[i + 1:]
-                a    = (np.sin(dlat / 2) ** 2 +
-                        np.cos(lats_r[i]) * np.cos(lats_r[i + 1:]) *
-                        np.sin(dlon / 2) ** 2)
-                d    = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
-                close_j = np.where(d < 30)[0]
-                if len(close_j):
-                    too_close.add(i)
-                    too_close.update(int(i + 1 + j) for j in close_j)
-
-            for k in too_close:
-                mask_sq4[valid_idx[k]] = True
-
-        add("SQ4", "Settlements Too Close (< 30 m)",
-            "each settlement must be more than 30 metres from all other settlements",
-            mask_sq4, ["ward_code", "settlement_name", "latitude", "longitude"])
-
-    return checks, pd.concat(details) if details else pd.DataFrame()
-
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
 def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
                   tp_fail_rows: int, schema_detail: pd.DataFrame,
@@ -714,54 +461,6 @@ def build_corrected_excel(df: pd.DataFrame) -> bytes:
             ws.column_dimensions[get_column_letter(ci)].width = max(
                 len(str(col)) + 4, 14)
     return out.getvalue()
-
-
-# ─── QC Engine — MLoS ────────────────────────────────────────────────────────────
-# ─── QC Engine — Takeoffpoint ────────────────────────────────────────────────────
-def run_takeoff_qc(takeoff: pd.DataFrame, mlos: pd.DataFrame):
-    if takeoff.empty or len(takeoff.columns) == 0:
-        return [], pd.DataFrame()
-    checks, details = [], []
-    total  = len(takeoff)
-    id_col = "ogc_fid" if "ogc_fid" in takeoff.columns else takeoff.columns[0]
-    BASE   = [c for c in [id_col,"name","wardcode","code"] if c in takeoff.columns]
-
-    def add(num, rule, desc, mask, extra=None):
-        n    = int(mask.sum())
-        cols = BASE + [c for c in (extra or []) if c in takeoff.columns and c not in BASE]
-        checks.append({"Rule#": num, "QC Check": rule, "Description": desc,
-                       "Failing Rows": n, "Total Rows": total,
-                       "Fail %": pct(n, total),
-                       "Status": "❌ FAIL" if n else "✅ PASS"})
-        if n:
-            sub = takeoff[mask][cols].copy()
-            sub.insert(0, "Rule#", num)
-            sub.insert(1, "Rule", rule)
-            details.append(sub)
-
-    if "name" in takeoff.columns and "takeoffpoint" in mlos.columns:
-        add("TP2","Name matches MLoS takeoffpoint",
-            "name in Takeoffpoint must match takeoffpoint column in MLoS",
-            ~takeoff["name"].astype(str).str.strip().isin(set(mlos["takeoffpoint"].dropna().str.strip())),
-            ["name"])
-
-    if "code" in takeoff.columns and "takeoffpoint_code" in mlos.columns:
-        add("TP3","Code matches MLoS takeoffpoint_code",
-            "code in Takeoffpoint must match takeoffpoint_code in MLoS",
-            ~takeoff["code"].astype(str).str.strip().isin(set(mlos["takeoffpoint_code"].dropna().str.strip())),
-            ["code"])
-
-    if "wardcode" in takeoff.columns and "ward_code" in mlos.columns:
-        add("TP4","wardcode matches MLoS ward_code",
-            "wardcode in Takeoffpoint must match ward_code in MLoS",
-            ~takeoff["wardcode"].astype(str).str.strip().isin(set(mlos["ward_code"].dropna().str.strip())),
-            ["wardcode"])
-
-    if "globalid" in takeoff.columns:
-        add("TP5","globalid is UUID","globalid must be a valid UUID",
-            ~vec_is_uuid(takeoff["globalid"]), ["globalid"])
-
-    return checks, pd.concat(details, ignore_index=True) if details else pd.DataFrame()
 
 
 # ─── Excel Report Builder ─────────────────────────────────────────────────────────
@@ -1148,7 +847,8 @@ else:
         # ── Step 3 / 5: Settlement QC ────────────────────────────────────
         qc_bar.progress(41, text="📐 Step 3 / 5 — Settlement QC…")
         st.write("📐 Step 3 / 5 — Settlement QC")
-        settlement_checks, settlement_detail = run_settlement_qc(mlos_df)
+        settlement_checks, settlement_detail = qc.settlement.run_settlement_qc(mlos_df)
+        settlement_checks = qc.sort_by_registry(settlement_checks)
         sq_fail = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if sq_fail else '✅'} Settlement: "
                  f"{len(settlement_checks) - sq_fail}/{len(settlement_checks)} checks passed")
@@ -1161,7 +861,8 @@ else:
             tp_checks, tp_detail = [], pd.DataFrame()
             st.write("   ⚠️ Takeoffpoint data not available — skipped")
         else:
-            tp_checks, tp_detail = run_takeoff_qc(takeoff_df, mlos_df)
+            tp_checks, tp_detail = qc.takeoff.run_takeoff_qc(takeoff_df, mlos_df)
+            tp_checks = qc.sort_by_registry(tp_checks)
             tp_qc_fail = sum(1 for c in tp_checks if "FAIL" in c["Status"])
             st.write(f"   {'❌' if tp_qc_fail else '✅'} Takeoffpoint: "
                      f"{len(tp_checks) - tp_qc_fail}/{len(tp_checks)} checks passed")
@@ -1170,7 +871,8 @@ else:
         # ── Step 5 / 5: Boundary Checks ──────────────────────────────────
         qc_bar.progress(81, text="🗺️ Step 5 / 5 — Boundary Checks…")
         st.write("🗺️ Step 5 / 5 — Boundary Checks")
-        boundary_checks, boundary_detail = run_ward_boundary_qc(mlos_df, boundary_ref, boundary_bbox)
+        boundary_checks, boundary_detail = qc.boundary.run_ward_boundary_qc(mlos_df, boundary_ref, boundary_bbox)
+        boundary_checks = qc.sort_by_registry(boundary_checks)
         b_fail = sum(1 for c in boundary_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if b_fail else '✅'} Boundary: "
                  f"{len(boundary_checks) - b_fail}/{len(boundary_checks)} checks passed")

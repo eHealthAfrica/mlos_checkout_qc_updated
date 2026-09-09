@@ -1,12 +1,16 @@
 """Parity harness: prove an extracted qc/ layer produces exactly what the frozen pre-extraction
 baseline recorded (tests/baseline/qc_baseline.json).
 
-Exposes two normalisation helpers plans 04, 05 and 06 will reuse as they add their own layers'
-parity tests: ``normalize_checks`` (sorts a checks list the same way capture_baseline.py's
-``_layer()`` did — by the pair of check name and description) and ``normalize_detail`` (sorts a
-detail DataFrame's records with column order preserved). This file adds one test function per
-extracted layer; do not build a parameterised table over layers that do not exist yet in qc/,
-which would either skip or fail for the four layers still living in app.py.
+Exposes normalisation helpers plans 04, 05 and 06 reuse as they add their own layers' parity
+tests: ``normalize_checks`` (sorts a checks list the same way capture_baseline.py's ``_layer()``
+did — by the pair of check name and description), ``normalize_detail`` (sorts a detail
+DataFrame's records with column order preserved), and ``_nan_safe`` (replaces float NaN cells
+with a fixed sentinel on both sides of a detail comparison — needed by any layer whose detail
+rows carry a genuine null cell, or whose concatenated per-rule detail frames pick up NaN from
+column-union across rules with different ``extra`` columns; Settlement, Takeoffpoint and
+Boundary all hit the latter case). This file adds one test function per extracted layer; do not
+build a parameterised table over layers that do not exist yet in qc/, which would either skip or
+fail for layers still living in app.py.
 """
 
 import json
@@ -184,3 +188,85 @@ def test_mlos_layer_matches_baseline(mlos_df, takeoff_df):
         f"checks' Rule# back to the baseline's bare identifier): "
         f"actual={actual_detail!r} expected={expected_detail!r}"
     )
+
+
+def test_settlement_layer_matches_baseline(mlos_df):
+    """qc.settlement.run_settlement_qc, run against the fixture, must produce — after
+    normalisation — a checks list identical to the baseline's settlement entry on every field
+    including Rule# (SQ1/SQ2/SQ2b/SQ3/SQ4 are frozen by D-04 and were never renamed), and a
+    detail record set identical to the baseline's."""
+    checks, detail = qc.settlement.run_settlement_qc(mlos_df)
+
+    actual_checks = normalize_checks(checks)
+    actual_detail = _nan_safe(normalize_detail(detail))
+
+    expected_checks = BASELINE["settlement"]["checks"]
+    expected_detail = _nan_safe(BASELINE["settlement"]["detail"])
+
+    _assert_checks_match_baseline("settlement", actual_checks, expected_checks)
+    assert actual_detail == expected_detail, (
+        f"settlement detail records diverged from baseline: actual={actual_detail!r} "
+        f"expected={expected_detail!r}"
+    )
+
+
+def test_takeoff_layer_matches_baseline(takeoff_df, mlos_df):
+    """qc.takeoff.run_takeoff_qc, run against the fixture, must produce — after normalisation —
+    a checks list identical to the baseline's takeoff entry on every field including Rule#
+    (TP2/TP3/TP4/TP5 are frozen by D-04 and were never renamed), and a detail record set
+    identical to the baseline's."""
+    checks, detail = qc.takeoff.run_takeoff_qc(takeoff_df, mlos_df)
+
+    actual_checks = normalize_checks(checks)
+    actual_detail = _nan_safe(normalize_detail(detail))
+
+    expected_checks = BASELINE["takeoff"]["checks"]
+    expected_detail = _nan_safe(BASELINE["takeoff"]["detail"])
+
+    _assert_checks_match_baseline("takeoff", actual_checks, expected_checks)
+    assert actual_detail == expected_detail, (
+        f"takeoff detail records diverged from baseline: actual={actual_detail!r} "
+        f"expected={expected_detail!r}"
+    )
+
+
+def test_boundary_layer_matches_baseline(mlos_df, boundary_refs):
+    """qc.boundary.run_ward_boundary_qc, run against the fixture and the real bundled boundary
+    reference, must produce — after normalisation — a checks list identical to the baseline's
+    boundary entry on every field including Rule# (B0/B1/B2/B3 are frozen by D-04 and were never
+    renamed), and a detail record set identical to the baseline's."""
+    ref_df, bbox_df = boundary_refs
+    checks, detail = qc.boundary.run_ward_boundary_qc(mlos_df, ref_df, bbox_df)
+
+    actual_checks = normalize_checks(checks)
+    actual_detail = _nan_safe(normalize_detail(detail))
+
+    expected_checks = BASELINE["boundary"]["checks"]
+    expected_detail = _nan_safe(BASELINE["boundary"]["detail"])
+
+    _assert_checks_match_baseline("boundary", actual_checks, expected_checks)
+    assert actual_detail == expected_detail, (
+        f"boundary detail records diverged from baseline: actual={actual_detail!r} "
+        f"expected={expected_detail!r}"
+    )
+
+
+def test_takeoff_layer_returns_nothing_for_an_empty_frame():
+    """The relocated Takeoffpoint layer must preserve its pre-extraction skip path: an empty
+    takeoff frame produces an empty check list and an empty detail frame, rather than a
+    fabricated pass — this is the condition Phase 3's VERDICT-02 will score as not-applicable."""
+    checks, detail = qc.takeoff.run_takeoff_qc(pd.DataFrame(), pd.DataFrame())
+    assert checks == []
+    assert detail.empty
+
+
+def test_boundary_layer_reports_a_missing_ward_code_column(mlos_df, boundary_refs):
+    """With the ward_code column dropped, the relocated Boundary layer must return exactly one
+    check, identifier B0, and an empty detail frame — the early-return path that keeps a file
+    missing that column from crashing the run."""
+    ref_df, bbox_df = boundary_refs
+    dropped = mlos_df.drop(columns=["ward_code"])
+    checks, detail = qc.boundary.run_ward_boundary_qc(dropped, ref_df, bbox_df)
+    assert len(checks) == 1
+    assert checks[0]["Rule#"] == "B0"
+    assert detail.empty
