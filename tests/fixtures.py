@@ -214,7 +214,19 @@ def build_mlos_fixture() -> pd.DataFrame:
 def build_takeoff_fixture() -> pd.DataFrame:
     """Return a 3-row Takeoffpoint DataFrame: two entries matching the MLoS fixture's default
     takeoffpoint, and one orphan entry that matches no MLoS row on name, code or ward_code and
-    also carries an invalid globalid — failing TP2, TP3, TP4 and TP5 all from a single row."""
+    also carries an invalid globalid — failing TP2, TP3, TP4 and TP5 all from a single row.
+
+    Column order is deliberately ``globalid`` first, not the ``name`` first order the required
+    set might suggest: ``run_takeoff_qc`` (app.py) picks ``takeoff.columns[0]`` as its row-id
+    column whenever no ``ogc_fid`` column is present, then unconditionally also includes
+    literal ``"name"``, ``"wardcode"`` and ``"code"`` in its base column list. Putting one of
+    those three literal names first would make that base list contain the same column name
+    twice, which raises ``InvalidIndexError`` inside ``pandas.concat`` the moment two failing
+    rows are collected into one detail frame — a real app.py behavior, reproducible with
+    today's un-refactored code, that has nothing to do with the rules TP2-TP5 test. Ordering
+    ``globalid`` first (a column the real Takeoffpoint view would carry as an id-like column
+    of its own) avoids the collision while changing no validation code or check result.
+    """
     rows = [
         {"name": "TP-A", "code": "TPC-A", "wardcode": FIXTURE_WARD_CODE,
          "globalid": "c1111111-1111-1111-1111-111111111111"},
@@ -223,7 +235,7 @@ def build_takeoff_fixture() -> pd.DataFrame:
         {"name": "TP-A", "code": "TPC-A", "wardcode": FIXTURE_WARD_CODE,
          "globalid": "c2222222-2222-2222-2222-222222222222"},
     ]
-    return pd.DataFrame(rows, columns=TAKEOFF_REQUIRED_COLS)
+    return pd.DataFrame(rows, columns=["globalid", "name", "code", "wardcode"])
 
 
 def load_boundary_fixtures() -> "tuple[pd.DataFrame, pd.DataFrame]":
