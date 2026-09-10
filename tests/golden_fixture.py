@@ -50,6 +50,20 @@ class _BlankMarker:
 
 BLANK = _BlankMarker()
 
+# INTEG-03/F7 non-canonical header spellings, for tests/test_normalisation_at_load.py's F7
+# contrast test. Exactly three required MLoS columns, deliberately misspelled: 'takeoffpoint'
+# (guards R2/2.missing), 'ward_code' (guards R4/4.missing, B0-B3), and 'set_population' (guards
+# R9/R10). These spellings ARE the point of the test and must never be "corrected" — the whole
+# purpose is to prove qc.columns.normalize_columns resolves them back to canonical form and that
+# the rules which silently skipped them (because their column-presence guards test the raw frame)
+# now fire. Applied only via the `header_map` parameter below — the canonical builders and
+# writers stay byte-for-byte unchanged for every existing caller that omits it.
+NONCANONICAL_HEADER_MAP = {
+    "takeoffpoint": "Takeoffpoint",
+    "ward_code": "Ward Code",
+    "set_population": "SET_POPULATION",
+}
+
 
 class FakeUploadedFile(BytesIO):
     """Minimal stand-in for Streamlit's UploadedFile. Streamlit's real UploadedFile is itself an
@@ -94,17 +108,30 @@ def _rows_to_dataframe(rows: "list[dict]", cols: "list[str]", blank_value) -> pd
     return pd.DataFrame(translated, columns=cols)
 
 
-def build_sqlite_bytes(rows: "list[dict]", cols: "list[str]") -> bytes:
+def _apply_header_map(df: pd.DataFrame, header_map: "dict[str, str] | None") -> pd.DataFrame:
+    """Rename ``df``'s columns per ``header_map`` (canonical -> non-canonical spelling), or
+    return ``df`` unchanged when ``header_map`` is falsy. Isolated here so every writer applies
+    the same rename in the same way."""
+    return df.rename(columns=header_map) if header_map else df
+
+
+def build_sqlite_bytes(rows: "list[dict]", cols: "list[str]", header_map: "dict[str, str] | None" = None) -> bytes:
     """Write `rows` into a real SQLite file (base tables plus the two named views
     qc.loaders.load_view resolves against) and return its bytes. The blank marker becomes a
     genuine Python None in the executemany parameters, so SQLite stores a real SQL NULL — not an
-    empty-string cell — for the blank cell."""
+    empty-string cell — for the blank cell.
+
+    ``header_map``, if given, renames the *physical column names written to the table* (and
+    therefore the view) from ``cols``' canonical spelling to a non-canonical one — values are
+    still looked up from each row dict by the canonical key in ``cols``, only the on-disk header
+    text changes. Defaults to ``None``, leaving every existing caller's bytes unchanged."""
+    write_cols = [header_map.get(c, c) if header_map else c for c in cols]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
     tmp.close()
     try:
         conn = sqlite3.connect(tmp.name)
         try:
-            col_defs = ", ".join(f'"{c}" TEXT' for c in cols)
+            col_defs = ", ".join(f'"{w}" TEXT' for w in write_cols)
             conn.execute(f'CREATE TABLE mlos_base ({col_defs})')
             placeholders = ", ".join("?" for _ in cols)
             params = [
@@ -129,21 +156,48 @@ def build_sqlite_bytes(rows: "list[dict]", cols: "list[str]") -> bytes:
             pass
 
 
-def build_csv_bytes(rows: "list[dict]", cols: "list[str]") -> bytes:
+def build_csv_bytes(rows: "list[dict]", cols: "list[str]", header_map: "dict[str, str] | None" = None) -> bytes:
     """CSV encoding of `rows`: the blank marker becomes an empty-string cell, the blank
-    convention `keep_default_na=False` contracts for on every loader."""
+    convention `keep_default_na=False` contracts for on every loader.
+
+    ``header_map``, if given, renames the written header row from ``cols``' canonical spelling to
+    a non-canonical one after the frame is built — values are unaffected. Defaults to ``None``,
+    leaving every existing caller's bytes unchanged."""
     df = _rows_to_dataframe(rows, cols, blank_value="")
+    df = _apply_header_map(df, header_map)
     return df.to_csv(index=False).encode("utf-8")
 
 
-def build_xlsx_bytes(rows: "list[dict]", cols: "list[str]") -> bytes:
+def build_xlsx_bytes(rows: "list[dict]", cols: "list[str]", header_map: "dict[str, str] | None" = None) -> bytes:
     """XLSX encoding of `rows`: two sheets, named from qc.loaders' own alias sets ("mlos",
     "takeoffpoint") so load_xlsx's alias resolution finds them. The blank marker becomes an
-    empty-string cell, same as the CSV writer."""
+    empty-string cell, same as the CSV writer.
+
+    ``header_map``, if given, renames the MLoS sheet's written header row from ``cols``'
+    canonical spelling to a non-canonical one after the frame is built (the inert Takeoffpoint
+    sheet is untouched — it carries no canonical name to begin with). Defaults to ``None``,
+    leaving every existing caller's bytes unchanged."""
     mlos_df = _rows_to_dataframe(rows, cols, blank_value="")
+    mlos_df = _apply_header_map(mlos_df, header_map)
     takeoff_df = pd.DataFrame({"_placeholder": []})  # no TAKEOFF_REQUIRED_COLS name — see module docstring
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         mlos_df.to_excel(writer, index=False, sheet_name="mlos")
         takeoff_df.to_excel(writer, index=False, sheet_name="takeoffpoint")
     return out.getvalue()
+
+
+def build_sqlite_bytes_noncanonical(rows: "list[dict]", cols: "list[str]") -> bytes:
+    """build_sqlite_bytes with NONCANONICAL_HEADER_MAP applied — the per-format writer
+    tests/test_normalisation_at_load.py's three-format round-trip test uses."""
+    return build_sqlite_bytes(rows, cols, header_map=NONCANONICAL_HEADER_MAP)
+
+
+def build_csv_bytes_noncanonical(rows: "list[dict]", cols: "list[str]") -> bytes:
+    """build_csv_bytes with NONCANONICAL_HEADER_MAP applied — see build_sqlite_bytes_noncanonical."""
+    return build_csv_bytes(rows, cols, header_map=NONCANONICAL_HEADER_MAP)
+
+
+def build_xlsx_bytes_noncanonical(rows: "list[dict]", cols: "list[str]") -> bytes:
+    """build_xlsx_bytes with NONCANONICAL_HEADER_MAP applied — see build_sqlite_bytes_noncanonical."""
+    return build_xlsx_bytes(rows, cols, header_map=NONCANONICAL_HEADER_MAP)
