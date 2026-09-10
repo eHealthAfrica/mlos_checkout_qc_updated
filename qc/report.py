@@ -528,3 +528,47 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
 
     wb.save(out)
     return out.getvalue()
+
+
+# D-16: the fixed prefix every subject starts with, ahead of the compact verdict and the
+# filename.
+EMAIL_SUBJECT_PREFIX = "MLoS QC:"
+
+
+def build_email_subject_and_body(summary: QcSummary) -> "tuple[str, str]":
+    """Build the emailed summary's subject and plain-text body (D-14/D-16), relocated and pure --
+    Analog F in 03-PATTERNS.md.
+
+    Pure: takes only the shared ``QcSummary``, reads no secrets (``st.secrets``), imports no
+    transport (``smtplib``), so it is unit-testable without a Streamlit runtime or an SMTP mock.
+    ``app.py``'s ``send_qc_email`` calls this and stays a thin SMTP sender.
+
+    Task 1's scope is the seam, the subject and the header block. Task 2 adds the per-layer
+    blocks (D-14), the Schema missing-columns block and the grouped check-by-check list (D-15)
+    between the header and the footer.
+    """
+    # D-16: verdict_short, not verdict_text -- the two approved subjects carry no unrun-layer
+    # gap clause, and appending the full sentence would put two em-dash separators in one
+    # subject line and make the filename clause ambiguous. The body's verdict line below uses
+    # verdict_text instead, so the gap is still communicated, just not in the subject.
+    subject = f"{EMAIL_SUBJECT_PREFIX} {summary.verdict_short} — {summary.filename}"
+
+    lines = [
+        f"MLoS QC Report — {summary.filename}",
+        "=" * 60,
+        # D-04: the same verdict sentence the banner, the Generate Report tab and the report
+        # cover print -- no tick/cross glyph decoration, so a literal comparison against the
+        # other three sites (plan 04's agreement test) holds.
+        f"Overall Verdict   : {summary.verdict_text}",
+        f"Weighted Score    : {summary.score_display}",
+        f"Checks Run        : {summary.checks_run}",
+        f"Checks Passing    : {summary.n_pass}",
+        f"Checks Failing    : {summary.n_fail}",
+        f"Issue Rows        : {summary.headline_issue_line}",
+    ]
+
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    body = "\n".join(lines) + "\n"
+    return subject, body

@@ -271,10 +271,14 @@ def load_boundary_refs():
     return ref_df, bbox_df
 
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
-def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
-                  tp_fail_rows: int, schema_detail: pd.DataFrame,
-                  boundary_fail_rows: int):
-    """Send QC summary email using SMTP credentials stored in st.secrets."""
+def send_qc_email(summary):
+    """Send QC summary email using SMTP credentials stored in st.secrets.
+
+    Thin sender only (03-03 Task 1): the subject and body are built by ``qc.report``'s pure
+    ``build_email_subject_and_body`` function, which reads only the shared summary object.
+    Recipients stay hard-coded here exactly as before -- moving them to Space secrets is
+    DEPLOY-03 in Phase 4, out of this phase's scope.
+    """
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
@@ -284,39 +288,13 @@ def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
            "victor.idakwo@ehealthnigeria.org",
            "oluwadamilare.akindipe@ehealthnigeria.org"]
 
-    n_fail  = sum(1 for c in all_checks if "FAIL" in c["Status"])
-    n_pass  = len(all_checks) - n_fail
-    verdict = "CLEAN ✅" if n_fail == 0 else f"FAILING ❌ ({n_fail} check(s))"
-
-    schema_lines = ""
-    if not schema_detail.empty:
-        missing = schema_detail[["Table","Missing Column"]].to_string(index=False)
-        schema_lines = f"\nMissing Columns:\n{missing}\n"
-
-    body = f"""MLoS QC Report — {filename}
-{"="*60}
-Overall Verdict   : {verdict}
-Checks Run        : {len(all_checks)}
-Checks Passing    : {n_pass}
-Checks Failing    : {n_fail}
-
-MLoS Issue Rows       : {mlos_fail_rows:,}
-Takeoffpoint Issue Rows: {tp_fail_rows:,}
-Boundary Issue Rows   : {boundary_fail_rows:,}
-{schema_lines}
-Check-by-Check Summary:
-{"-"*60}
-"""
-    for c in all_checks:
-        body += f"[{c['Status']}] Rule {c['Rule#']}: {c['QC Check']} — {c['Failing Rows']} failing / {c['Total Rows']} ({c['Fail %']})\n"
-
-    body += f"\n{'='*60}\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    subject, body = qc.report.build_email_subject_and_body(summary)
 
     msg = MIMEMultipart()
     msg["From"]    = st.secrets.get("smtp_user", "")
     msg["To"]      = ", ".join(TO)
     msg["Cc"]      = ", ".join(CC)
-    msg["Subject"] = f"MLoS QC checks for {filename}"
+    msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
     smtp_host = st.secrets.get("smtp_host", "smtp.gmail.com")
@@ -1199,9 +1177,7 @@ with tab8:
     st.caption("Sends the QC summary to the data team. SMTP credentials must be configured in Streamlit secrets.")
     if st.button("📤 Send QC Email", type="primary", key="send_email_btn"):
         try:
-            send_qc_email(filename, summary.all_checks, summary.layers["MLoS"].findings,
-                          summary.layers["Takeoffpoint"].findings, schema_detail,
-                          summary.layers["Boundary"].findings)
+            send_qc_email(summary)
             st.success("✅ Email sent successfully to the data team.")
         except Exception as e:
             st.error(f"❌ Failed to send email: {e}"
