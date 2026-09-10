@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Detection Correctness and Three-Format Harness
 status: executing
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-09-10T17:21:00.780Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-09-10T18:13:41.635Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 02 execution started
-state_head: 00f47611f4c1731c66fe73649e6093daef08112a
+state_head: 90999a6ec8250d2bb550953236ac42962553eed6
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 16
-  completed_plans: 11
+  completed_plans: 12
   percent: 14
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 02 (Detection Correctness and Three-Format Harness) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 02 execution started
 
@@ -69,6 +69,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 02 P03 | 25min | 2 tasks | 5 files |
 | Phase 02 P04 | 3h 37m | 3 tasks | 3 files |
 | Phase 02 P05 | 45min | 2 tasks | 6 files |
+| Phase 02 P06 | 50 min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,9 @@ Recent decisions affecting current work:
 - [Phase 02]: [Phase 02] Plan 04: Column renames are reported to the officer in exactly two places -- an on-screen expander in Tab 1 and a conditional Columns Renamed sheet in the downloaded report -- with no Pass/Fail and no score weight, verified live per D-11 (Task 3 checkpoint, all four verdicts pass). — build_excel_report's new column_renames keyword parameter defaults to None so existing callers keep working, and an AST-level acceptance check confirms the rename record never enters all_checks or LAYER_WEIGHTS.
 - [Phase 02]: [Phase 02] Plan 05: B4/B5 report the boundary reference's national-fallback widening and unavailability as failing checks instead of silent branches, closing INTEG-04; canonical boundary order extended to B0-B5 (49 identifiers total). — D-16 through D-19 promote reference scope and availability to first-class reported facts; B4's FAIL description deliberately names both B1 and B2 since the fallback reassigns both frames.
 - [Phase 02]: [Phase 02] Plan 05: Fixed test_deterministic_order.py's full-registry equality assertion (Rule 1), broken the instant B5 was registered, since that test's fixture always carries a real reference and can never emit a reference-absence-only check. — B5's real coverage proof lives in test_registry_covers_emitted_ids.py's dedicated reference-absent scenario (Task 2); excluding B5 from the deterministic-order comparison keeps that test's real purpose (cross-process order stability) intact.
+- [Phase 02]: D-12 confirmed as written: generated eha_guid is a session-scoped uuid4(), not derived from content
+- [Phase 02]: Phase 02: build_excel_report's MLoS parameter renamed mlos_df -> mlos_as_submitted to make the as-submitted intent legible and let the AST guard check an unambiguous name
+- [Phase 02]: Phase 02: get_uploaded_data's internal parse-and-normalise local deliberately named _mlos_parsed (not mlos_raw) so the whole-file mlos_raw-consumer AST guard stays unambiguous
 
 ### Pending Todos
 
@@ -129,6 +133,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T17:21:00.734Z
-Stopped at: Completed 02-05-PLAN.md
+Last session: 2026-09-10T18:13:41.585Z
+Stopped at: Completed 02-06-PLAN.md
 Resume file: None

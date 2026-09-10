@@ -35,8 +35,8 @@ Rule identity, state handling and the structural seam the new layers will be bui
 
 - [x] **ENGINE-01**: Every check carries a rule identifier that is unique across all layers — closes F3
 - [x] **ENGINE-02**: Rule identifier uniqueness is enforced when the rule registry is imported, and is covered by a standing test so the defect cannot reopen as the rule set grows
-- [ ] **ENGINE-03**: Displayed data and computed checks always describe the same version of the submission, on the first render and on every subsequent rerun — closes F4
-- [ ] **ENGINE-04**: Auto-correction runs exactly once per submission and produces the same output each time it is displayed, including generated `eha_guid` values — closes F5
+- [x] **ENGINE-03**: Displayed data and computed checks always describe the same version of the submission, on the first render and on every subsequent rerun — closes F4
+- [x] **ENGINE-04**: Auto-correction runs exactly once per submission and produces the same output each time it is displayed, including generated `eha_guid` values — closes F5
 - [x] **ENGINE-05**: All QC layers live in a `qc/` package containing no `import streamlit`, enforced by a test
 - [x] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
 - [x] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
@@ -168,8 +168,8 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | INTEG-04 | Phase 2 | Complete |
 | ENGINE-01 | Phase 1 | Complete |
 | ENGINE-02 | Phase 1 | Complete |
-| ENGINE-03 | Phase 2 | Pending |
-| ENGINE-04 | Phase 2 | Pending |
+| ENGINE-03 | Phase 2 | Complete |
+| ENGINE-04 | Phase 2 | Complete |
 | ENGINE-05 | Phase 1 | Complete |
 | ENGINE-06 | Phase 2 | Complete |
 | ENGINE-07 | Phase 1 | Complete |

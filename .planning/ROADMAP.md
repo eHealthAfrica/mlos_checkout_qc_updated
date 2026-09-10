@@ -132,7 +132,7 @@ Plans:
   4. The findings on screen describe the same version of the submission as the downloadable auto-corrected file, and a generated `eha_guid` is identical on first render and on every rerun
   5. A boundary-reference fallback to the full national set appears to the officer as a warning rather than silently widening B1
 
-**Plans**: 5/6 plans executed
+**Plans**: 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -157,7 +157,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 02-06-PLAN.md — One corrected snapshot per submission, identified by content, with the AST guard (ENGINE-03, ENGINE-04)
+- [x] 02-06-PLAN.md — One corrected snapshot per submission, identified by content, with the AST guard (ENGINE-03, ENGINE-04)
 
 **Notes**: `"NA"` is a valid domain value in the flag columns *and* Nasarawa's state code, which is why every loader passes `keep_default_na=False`. That decision is correct — INTEG-01 (F2) and INTEG-02 (F9) are unhandled consequences of it, not reasons to reverse it. Research flag: run the golden fixture explicitly against pandas 3.0.5; the Copy-on-Write and string-dtype migrations are subtle.
 
@@ -273,7 +273,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
-| 2. Detection Correctness and Three-Format Harness | 5/6 | In Progress|  |
+| 2. Detection Correctness and Three-Format Harness | 6/6 | In Progress|  |
 | 3. Verdict and Report Integrity | 0/TBD | Not started | - |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
 | 5. Submission Record | 0/TBD | Not started | - |
