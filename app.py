@@ -1169,10 +1169,10 @@ with tab8:
 
     # Download
     st.markdown("**📥 Download Full QC Report**")
-    st.caption("Excel report: Cover Page · MLoS QC Summary · MLoS Issue Detail · "
-               "Takeoffpoint QC Summary · Takeoffpoint Issue Detail · Raw MLoS Data · "
-               "Raw Takeoffpoint Data · Columns Renamed (only present when a header was "
-               "renamed at load)")
+    st.caption("Excel report: Cover Page · QC Summary · Schema Issue Detail · "
+               "MLoS Issue Detail · Settlement Issue Detail · Takeoffpoint Issue Detail · "
+               "Boundary Issue Detail · Raw MLoS Data · Raw Takeoffpoint Data · "
+               "Columns Renamed (only present when a header was renamed at load)")
 
     with st.spinner("Building Excel report…"):
         report_bytes = qc.report.build_workbook(

@@ -47,6 +47,28 @@ NOT_RUN_REASON = {
     "Boundary": "no Boundary data supplied",
 }
 
+# D-06: the unconditional sheet order. "Columns Renamed" stays out of this tuple and is
+# appended by build_workbook only when a rename is supplied (Phase 2 D-11) -- a clean
+# submission gets no sheet at all, not an empty one.
+SHEET_NAMES = (
+    "QC Report Cover",
+    "QC Summary",
+    *(f"{name} Issue Detail" for name in LAYER_ORDER),
+    "Raw MLoS Data",
+    "Raw Takeoffpoint Data",
+)
+
+# The detail-sheet title text per layer (D-09's write_detail keeps this styled title row
+# unchanged). Schema's "rows" are missing columns, not source rows (D-13's precedent) so its
+# title says so rather than reusing the four row-oriented layers' wording.
+_DETAIL_TITLES = {
+    "Schema": "Schema Table — Missing Columns",
+    "MLoS": "MLoS Table — Detailed Issue Rows",
+    "Settlement": "Settlement Table — Detailed Issue Rows",
+    "Takeoffpoint": "Takeoffpoint Table — Detailed Issue Rows",
+    "Boundary": "Boundary Table — Detailed Issue Rows",
+}
+
 
 @dataclass(frozen=True)
 class LayerSummary:
@@ -265,6 +287,57 @@ def build_summary(filename, layer_results, mlos_row_count, takeoff_row_count) ->
     return QcSummary(filename=filename, layers=layers)
 
 
+def summary_rows(summary: QcSummary) -> list:
+    """Row dicts for the combined ``QC Summary`` sheet (D-06/D-07/D-08).
+
+    One row per check that ran, in registry canonical order, plus exactly one placeholder row
+    for any layer that ran zero checks, in that layer's canonical position -- so the sheet
+    alone can never read as a four-layer tool (D-07). The ``Layer`` column is sourced from
+    ``qc.results.get_rule`` (the single registry), never a second hand-kept lookup
+    (03-RESEARCH.md Pattern 2, the same class of divergence INTEG-03/F7 already closed once for
+    column names). A check whose registry layer disagrees with the layer whose checks list it
+    arrived in raises ``ValueError`` naming the identifier and both layer names, rather than
+    silently misfiling it on the sheet.
+
+    Does not rely on the caller having sorted a layer's checks: ``sort_by_registry`` is applied
+    here, inside this function, to every layer's own checks list before it is emitted.
+    """
+    rows = []
+    for name in LAYER_ORDER:
+        layer = summary.layers[name]
+        if not layer.ran:
+            rows.append({
+                "Layer": name,
+                "Status": "—",
+                "Rule#": "—",
+                "QC Check": f"{name} — not run: {layer.not_run_reason}",
+                "Description": f"{name} layer contributed no score this run",
+                "Failing Rows": "n/a",
+                "Total Rows": "n/a",
+                "Fail %": "n/a",
+            })
+            continue
+        for check in sort_by_registry(layer.checks):
+            registry_layer = get_rule(check["Rule#"]).layer
+            if registry_layer != name:
+                raise ValueError(
+                    f"Rule {check['Rule#']!r} is registered under layer {registry_layer!r} but "
+                    f"arrived in the {name!r} layer's checks list -- a rule is registered under "
+                    f"the wrong layer and would be silently misfiled on the QC Summary sheet"
+                )
+            rows.append({
+                "Layer": name,
+                "Status": check["Status"],
+                "Rule#": check["Rule#"],
+                "QC Check": check["QC Check"],
+                "Description": check["Description"],
+                "Failing Rows": check["Failing Rows"],
+                "Total Rows": check["Total Rows"],
+                "Fail %": check["Fail %"],
+            })
+    return rows
+
+
 def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd.DataFrame",
                     column_renames=None) -> bytes:
     """Build the downloadable QC report workbook, relocated from ``app.py``'s
@@ -303,9 +376,6 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
         for ci, col in enumerate(cols, 1):
             c = ws.cell(row=row, column=ci, value=col)
             c.fill = hdr_fill; c.font = hdr_font; c.alignment = ctr; c.border = bdr
-
-    mlos_l = summary.layers["MLoS"]
-    tp_l = summary.layers["Takeoffpoint"]
 
     # ── Sheet 1: Cover ──
     ws = wb.active; ws.title = "QC Report Cover"
@@ -346,25 +416,33 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
     vd.alignment = ctr
     ws.row_dimensions[verdict_row].height = 30
 
-    # helper to write a QC summary sheet
-    def write_summary(ws_s, title, checks_list):
+    # helper to write the one combined QC summary sheet (D-06): rows come from summary_rows(),
+    # each carrying its own Layer column sourced from the registry. A placeholder row (an
+    # unrun layer, D-07) gets the light-grey fill rather than pass or fail -- a not-run layer
+    # is neither.
+    def write_summary(ws_s, rows):
         ws_s.sheet_view.showGridLines = False
-        ws_s.merge_cells("A1:G1")
-        ws_s["A1"].value     = title
+        ws_s.merge_cells("A1:H1")
+        ws_s["A1"].value     = "Combined QC Check Summary — All Layers"
         ws_s["A1"].font      = Font(bold=True, size=13, color=WHT, name="Calibri")
         ws_s["A1"].fill      = PatternFill("solid", fgColor=BLU)
         ws_s["A1"].alignment = ctr
         ws_s.row_dimensions[1].height = 30
-        cols = ["Status","Rule#","QC Check","Description","Failing Rows","Total Rows","Fail %"]
+        cols = ["Layer","Status","Rule#","QC Check","Description","Failing Rows","Total Rows","Fail %"]
         hdr_row(ws_s, 2, cols)
-        for ri, row in enumerate(checks_list, 3):
-            is_fail = "FAIL" in row["Status"]
+        left_cols = {"QC Check", "Description"}
+        for ri, row in enumerate(rows, 3):
+            is_placeholder = row["Failing Rows"] == "n/a"
+            is_fail = (not is_placeholder) and "FAIL" in row["Status"]
             for ci, key in enumerate(cols, 1):
                 c = ws_s.cell(row=ri, column=ci, value=row[key])
                 c.font=body_font; c.border=bdr
-                c.alignment = ctr if ci in (1,2,5,6,7) else lft
-                c.fill = fail_fill if is_fail else pass_fill
-        for i, w in enumerate([14,8,32,65,14,12,9], 1):
+                c.alignment = lft if key in left_cols else ctr
+                if is_placeholder:
+                    c.fill = lgry_fill
+                else:
+                    c.fill = fail_fill if is_fail else pass_fill
+        for i, w in enumerate([14,14,8,32,50,14,12,9], 1):
             ws_s.column_dimensions[get_column_letter(i)].width = w
 
     # helper to write issue detail sheet
@@ -407,12 +485,18 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
         for ci in range(1, len(df.columns)+1):
             ws_r.column_dimensions[get_column_letter(ci)].width = 18
 
-    write_summary(wb.create_sheet("MLoS QC Summary"),       "MLoS Table — QC Check Summary",          mlos_l.checks)
-    write_detail (wb.create_sheet("MLoS Issue Detail"),      "MLoS Table — Detailed Issue Rows",        mlos_l.detail)
-    write_summary(wb.create_sheet("Takeoffpoint QC Summary"),"Takeoffpoint Table — QC Check Summary",   tp_l.checks)
-    write_detail (wb.create_sheet("Takeoffpoint Issue Detail"),"Takeoffpoint Table — Detailed Issues",  tp_l.detail)
-    write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_raw)
-    write_raw    (wb.create_sheet("Raw Takeoffpoint Data"),  takeoff_df)
+    # D-06: one combined QC Summary sheet, then one detail sheet per layer in LAYER_ORDER --
+    # never concatenated across layers (Takeoffpoint keys on its own table, Schema on columns,
+    # so a union would be mostly blanks).
+    write_summary(wb.create_sheet("QC Summary"), summary_rows(summary))
+    for name in LAYER_ORDER:
+        write_detail(
+            wb.create_sheet(f"{name} Issue Detail"),
+            _DETAIL_TITLES[name],
+            summary.layers[name].detail,
+        )
+    write_raw(wb.create_sheet("Raw MLoS Data"),         mlos_raw)
+    write_raw(wb.create_sheet("Raw Takeoffpoint Data"), takeoff_df)
 
     # ── Columns Renamed (Phase 2 INTEG-03/D-11) ───────────────────────────────────────────
     # Reported in exactly two places: this sheet and the on-screen expander (Tab 1). No
