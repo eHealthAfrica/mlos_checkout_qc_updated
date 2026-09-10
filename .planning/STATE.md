@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Verdict and Report Integrity
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-09-10T19:08:44.663Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-09-10T19:32:29.721Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: abdd81a06436c5795b2916366c55a8dbd4a54166
+state_head: dd25b73c2662ed3510e536026d87011755730444
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 16
-  completed_plans: 13
+  completed_plans: 14
   percent: 14
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 03 (Verdict and Report Integrity) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 03 execution started
 
@@ -72,6 +72,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 02 P05 | 45min | 2 tasks | 6 files |
 | Phase 02 P06 | 50 min | 3 tasks | 2 files |
 | Phase 03 P01 | 55min | 3 tasks | 9 files |
+| Phase 03 P02 | 45min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,8 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 02: get_uploaded_data's internal parse-and-normalise local deliberately named _mlos_parsed (not mlos_raw) so the whole-file mlos_raw-consumer AST guard stays unambiguous
 - [Phase 03]: 03-01: One shared QcSummary/LayerSummary computation replaces four independent app.py derivations of the verdict/score/row-count (closes F1's structural root cause, F6, F8)
 - [Phase 03]: 03-01: Documented discrepancy -- plan's Task 1 acceptance criteria claim "100.0% of 80.0% achievable" for a fully-passing four-layer run; implementation follows D-01's own worked example ("a perfect four-layer file scores 80.0%") instead, since renormalising would reopen F6
+- [Phase 03]: 03-02: Cover verdict cell holds summary.verdict_text verbatim, no glyph prefix -- follows the plan's literal behavior/acceptance criteria (exact-string match) over its action prose
+- [Phase 03]: 03-02: Report workbook reshaped to one combined QC Summary sheet (registry-sourced Layer column, D-07 placeholder rows) plus one detail sheet per layer, replacing the old two-summary-sheet shape
 
 ### Pending Todos
 
@@ -140,6 +143,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T19:08:44.542Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-09-10T19:32:29.673Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None

@@ -174,7 +174,7 @@ Plans:
   4. The emailed summary reports Settlement layer counts alongside the other four layers
   5. Boundary checks appear as B0, B1, B2, B3 in that order in every summary table and export, and raw-data sheets are written without per-cell font or border assignment
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -183,7 +183,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md — Report workbook: five-layer cover verdict, one combined summary sheet plus a detail sheet per layer, plain-value bulk sheets (VERDICT-01, VERDICT-02, ENGINE-08)
+- [x] 03-02-PLAN.md — Report workbook: five-layer cover verdict, one combined summary sheet plus a detail sheet per layer, plain-value bulk sheets (VERDICT-01, VERDICT-02, ENGINE-08)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -274,7 +274,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
 | 2. Detection Correctness and Three-Format Harness | 6/6 | Complete    | 2026-09-10 |
-| 3. Verdict and Report Integrity | 1/4 | In Progress|  |
+| 3. Verdict and Report Integrity | 2/4 | In Progress|  |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
 | 5. Submission Record | 0/TBD | Not started | - |
 | 6. Threshold Configuration and Advisory Severity | 0/TBD | Not started | - |

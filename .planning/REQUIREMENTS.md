@@ -13,8 +13,8 @@ category; exact phase mapping is filled in during roadmap creation.
 The report and score must describe every layer that ran. Four of these close audited defects
 that let a failing file be reported as clean.
 
-- [ ] **VERDICT-01**: The downloaded QC report contains summary and detail sheets for all five layers (Schema, MLoS, Settlement, Takeoffpoint, Boundary) — closes F1
-- [ ] **VERDICT-02**: The report cover verdict reads FAILING whenever any layer has a failing check, not only MLoS or Takeoffpoint — closes F1
+- [x] **VERDICT-01**: The downloaded QC report contains summary and detail sheets for all five layers (Schema, MLoS, Settlement, Takeoffpoint, Boundary) — closes F1
+- [x] **VERDICT-02**: The report cover verdict reads FAILING whenever any layer has a failing check, not only MLoS or Takeoffpoint — closes F1
 - [ ] **VERDICT-03**: The emailed summary reports Settlement layer counts alongside the other four layers — closes F11
 - [x] **VERDICT-04**: Issue-row totals on screen, in the report and in the email count distinct settlement rows, not rule-row pairs — closes F8
 - [x] **VERDICT-05**: The weighted score awards no credit for a layer that ran zero checks, and displays that layer as "n/a" rather than 100% — closes F6
@@ -40,7 +40,7 @@ Rule identity, state handling and the structural seam the new layers will be bui
 - [x] **ENGINE-05**: All QC layers live in a `qc/` package containing no `import streamlit`, enforced by a test
 - [x] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
 - [x] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
-- [ ] **ENGINE-08**: Raw-data report sheets are written without per-cell font and border assignment — closes F12
+- [x] **ENGINE-08**: Raw-data report sheets are written without per-cell font and border assignment — closes F12
 - [x] **ENGINE-09**: Rule emission order is deterministic across application restarts, so two reports over identical data can be diffed row-for-row — closes F10 (`YN_NA_COLS` is a set literal at `app.py:100` and Python randomises string hashing per process, so Rule 12's eight checks currently appear in a different order every restart)
 
 ### Deployment (M2)
@@ -156,8 +156,8 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VERDICT-01 | Phase 3 | Pending |
-| VERDICT-02 | Phase 3 | Pending |
+| VERDICT-01 | Phase 3 | Complete |
+| VERDICT-02 | Phase 3 | Complete |
 | VERDICT-03 | Phase 3 | Pending |
 | VERDICT-04 | Phase 3 | Complete |
 | VERDICT-05 | Phase 3 | Complete |
@@ -173,7 +173,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | ENGINE-05 | Phase 1 | Complete |
 | ENGINE-06 | Phase 2 | Complete |
 | ENGINE-07 | Phase 1 | Complete |
-| ENGINE-08 | Phase 3 | Pending |
+| ENGINE-08 | Phase 3 | Complete |
 | ENGINE-09 | Phase 1 | Complete |
 | DEPLOY-01 | Phase 4 | Pending |
 | DEPLOY-02 | Phase 4 | Pending |
