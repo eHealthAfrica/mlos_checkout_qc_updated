@@ -195,6 +195,36 @@ class QcSummary:
     def headline_issue_line(self) -> str:
         return f"{self.headline_distinct:,} issue rows across {self.headline_findings:,} findings"
 
+    @property
+    def gap_clause(self) -> str:
+        """The empty string when every layer ran, otherwise each unrun layer's own clause
+        joined with "; ", in LAYER_ORDER order. D-05's generic requirement: written for the
+        (currently unreachable) case of more than one unrun layer, not a case the user has
+        ruled on."""
+        return "; ".join(
+            f"{name} layer not checked ({self.layers[name].not_run_reason})"
+            for name in LAYER_ORDER
+            if name in self.layers and not self.layers[name].ran
+        )
+
+    @property
+    def verdict_short(self) -> str:
+        """CLEAN or FAILING (n check(s)) -- no gap clause. Exists solely for the D-16 email
+        subject template; every prose site reads verdict_text instead."""
+        if self.n_fail == 0:
+            return "CLEAN"
+        return f"FAILING ({self.n_fail} check{'s' if self.n_fail != 1 else ''})"
+
+    @property
+    def verdict_text(self) -> str:
+        """The two-state verdict (CLEAN / FAILING), with the D-04 gap clause appended in the
+        same position after either state whenever a layer did not run. A third state is Phase
+        6's advisory tier, not this phase's -- this property returns exactly one of two
+        prefixes, ever."""
+        if not self.gap_clause:
+            return self.verdict_short
+        return f"{self.verdict_short} — {self.gap_clause}"
+
 
 def build_summary(filename, layer_results, mlos_row_count, takeoff_row_count) -> QcSummary:
     """Build the one shared ``QcSummary`` from the five layers' ``(checks, detail)`` pairs.

@@ -42,8 +42,13 @@ def test_all_layers_ran_nothing_failing_is_clean():
     assert summary.verdict_text == "CLEAN"
 
 
+TWELVE_REGISTERED_MLOS_IDS = [
+    "1", "2", "2.missing", "3", "3.missing", "4", "4.missing", "5", "6", "7", "8", "9",
+]
+
+
 def test_all_layers_ran_twelve_failing_reads_plural_checks():
-    summary = _summary(_failing([str(i) for i in range(12)]))
+    summary = _summary(_failing(TWELVE_REGISTERED_MLOS_IDS))
     assert summary.verdict_text == "FAILING (12 checks)"
 
 
@@ -60,7 +65,7 @@ def test_clean_with_takeoffpoint_not_checked_names_the_gap_in_the_same_sentence(
 
 
 def test_failing_with_takeoffpoint_not_checked_appends_the_same_gap_clause():
-    summary = _summary(_failing([str(i) for i in range(12)]), takeoff_ran=False)
+    summary = _summary(_failing(TWELVE_REGISTERED_MLOS_IDS), takeoff_ran=False)
     assert summary.verdict_text == (
         "FAILING (12 checks) — Takeoffpoint layer not checked (no Takeoffpoint data supplied)"
     )
@@ -68,7 +73,7 @@ def test_failing_with_takeoffpoint_not_checked_appends_the_same_gap_clause():
 
 def test_verdict_short_drops_the_gap_clause_in_both_states():
     clean = _summary(_passing(["1"]), takeoff_ran=False)
-    failing = _summary(_failing([str(i) for i in range(12)]), takeoff_ran=False)
+    failing = _summary(_failing(TWELVE_REGISTERED_MLOS_IDS), takeoff_ran=False)
     assert clean.verdict_short == "CLEAN"
     assert failing.verdict_short == "FAILING (12 checks)"
 

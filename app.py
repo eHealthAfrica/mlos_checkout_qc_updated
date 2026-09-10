@@ -853,38 +853,31 @@ summary = qc.report.build_summary(
     takeoff_row_count=len(takeoff_df),
 )
 
-all_checks         = schema_checks + mlos_checks + settlement_checks + tp_checks + boundary_checks
-n_fail             = sum(1 for c in all_checks if "FAIL" in c["Status"])
-n_pass             = len(all_checks) - n_fail
-pct_pass           = f"{n_pass / len(all_checks) * 100:.1f}%" if all_checks else "0%"
-pct_fail           = f"{n_fail / len(all_checks) * 100:.1f}%" if all_checks else "0%"
-
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
 st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_corrected):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")
 
 c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
 c1.metric("📄 MLoS Rows",     f"{len(mlos_corrected):,}")
-c2.metric("🔍 Checks Run",    f"{len(all_checks)}")
-c3.metric("✅ Passing",       f"{n_pass}")
-c4.metric("❌ Failing",       f"{n_fail}")
+c2.metric("🔍 Checks Run",    f"{summary.checks_run}")
+c3.metric("✅ Passing",       f"{summary.n_pass}")
+c4.metric("❌ Failing",       f"{summary.n_fail}")
 c5.metric("⚠️ Issue Rows",   f"{summary.headline_distinct:,}", help=summary.headline_issue_line)
-c6.metric("📈 Pass Rate",     pct_pass)
+c6.metric("📈 Pass Rate",     summary.pct_pass)
 c7.metric("🏆 Weighted Score", f"{summary.weighted_score:.1f}%",
           help=f"of {summary.achievable_max:.1f}% achievable")
 
 st.markdown("---")
 
 # ─── VERDICT BANNER ───────────────────────────────────────────────────────────────
-if n_fail == 0:
-    st.markdown('<div class="banner-pass">✅ ALL QC CHECKS PASSED — This file is clean and ready for submission.</div>',
-                unsafe_allow_html=True)
+# One shared verdict sentence (D-04) — no site below recomputes a failing count (F1's shape).
+if summary.n_fail == 0:
+    st.markdown(
+        f'<div class="banner-pass">✅ {summary.verdict_text}. This file is ready for '
+        f'submission.</div>',
+        unsafe_allow_html=True)
 else:
     st.markdown(
-        f'<div class="banner-fail">❌ {n_fail} QC CHECK(S) FAILING — '
-        f'{summary.layers["MLoS"].findings} MLoS rows, '
-        f'{summary.layers["Settlement"].findings} Settlement rows, '
-        f'{summary.layers["Takeoffpoint"].findings} Takeoffpoint rows, and '
-        f'{summary.layers["Boundary"].findings} Boundary rows have issues. '
+        f'<div class="banner-fail">❌ {summary.verdict_text}. {summary.headline_issue_line}. '
         f'Review details below before submission.</div>',
         unsafe_allow_html=True)
 
@@ -1267,15 +1260,16 @@ with tab7:
 with tab8:
     st.markdown('<div class="sec-title">📄 QC Report — Summary &amp; Download</div>', unsafe_allow_html=True)
 
-    # Verdict
-    if n_fail == 0:
+    # Verdict — the same shared summary.verdict_text every other site reads (D-04, F1's fix).
+    if summary.n_fail == 0:
         st.markdown(
-            '<div class="report-verdict-pass">✅ &nbsp; ALL CHECKS PASSED — File is CLEAN and ready for submission</div>',
+            f'<div class="report-verdict-pass">✅ &nbsp; {summary.verdict_text} — File is '
+            f'ready for submission</div>',
             unsafe_allow_html=True)
     else:
         st.markdown(
-            f'<div class="report-verdict-fail">❌ &nbsp; {n_fail} CHECK(S) FAILING — '
-            f'{summary.headline_distinct:,} total issue rows. Fix before submission.</div>',
+            f'<div class="report-verdict-fail">❌ &nbsp; {summary.verdict_text} — '
+            f'{summary.headline_issue_line}. Fix before submission.</div>',
             unsafe_allow_html=True)
 
     # Metadata card
@@ -1370,11 +1364,10 @@ with tab8:
         type    = "primary",
     )
 
-    if n_fail == 0:
-        st.success("✅ File is CLEAN — all checks passed.")
+    if summary.n_fail == 0:
+        st.success(f"✅ {summary.verdict_text} — all checks passed.")
     else:
-        st.warning(f"⚠️ {n_fail} check(s) failing with "
-                   f"{summary.headline_distinct:,} issue rows. "
+        st.warning(f"⚠️ {summary.verdict_text} — {summary.headline_issue_line}. "
                    f"Fix and re-upload before submission.")
 
     st.markdown("---")
@@ -1382,7 +1375,7 @@ with tab8:
     st.caption("Sends the QC summary to the data team. SMTP credentials must be configured in Streamlit secrets.")
     if st.button("📤 Send QC Email", type="primary", key="send_email_btn"):
         try:
-            send_qc_email(filename, all_checks, summary.layers["MLoS"].findings,
+            send_qc_email(filename, summary.all_checks, summary.layers["MLoS"].findings,
                           summary.layers["Takeoffpoint"].findings, schema_detail,
                           summary.layers["Boundary"].findings)
             st.success("✅ Email sent successfully to the data team.")
