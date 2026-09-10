@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 03
-current_phase_name: Verdict and Report Integrity
-status: verifying
-stopped_at: Phase 4 context gathered; Phase 3 awaiting verification
-last_updated: "2026-09-10T21:03:20.994Z"
+current_phase: 04
+current_phase_name: Central Deployment and Officer Identity
+status: planning
+stopped_at: Phase 03 complete, ready to plan Phase 04
+last_updated: "2026-09-10T21:11:14.466Z"
 last_activity: 2026-09-10
-last_activity_desc: Phase 03 execution started
-state_head: 7b11d6dc85f3693ce4018c544f271e2df104ef31
+last_activity_desc: Phase 03 complete, transitioned to Phase 04
+state_head: 107a5d217fcdbebae5a23098c18e2413cd7e6026
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 16
   completed_plans: 16
-  percent: 14
+  percent: 29
 ---
 
 # Project State
@@ -23,22 +23,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** A file this tool calls clean is clean.
-**Current focus:** Phase 03 — Verdict and Report Integrity
+**Current focus:** Phase 04 — Central Deployment and Officer Identity (context gathered; planning in progress)
 
 ## Current Position
 
-Phase: 03 (Verdict and Report Integrity) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-09-10 — Phase 03 execution started
+Phase: 04 — Central Deployment and Officer Identity
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-10 — Phase 03 complete, transitioned to Phase 04
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 12
+- Total plans completed: 16
 - Average duration: —
 - Total execution time: —
 
@@ -48,6 +48,7 @@ Progress: [█░░░░░░░░░] 14%
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 02 | 6 | - | - |
+| 03 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -131,12 +132,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4] Open item — OIDC provider choice (native HF OAuth vs external IdP). Blocks AUTH-01, AUTH-02. Does not block architecture; both meet at the `auth.py` boundary.
-- [Phase 4] Open item — data-governance sign-off for hosting settlement coordinates and population figures on a third-party free tier. Named decision required before DEPLOY-01 rollout.
+- [Phase 4] OIDC provider RESOLVED in 04-CONTEXT.md D-01: Google Workspace via `st.login`, existing OAuth client; a startup step must render `.streamlit/secrets.toml` from flat Space env vars.
+- [Phase 4] Open item — data-governance sign-off for hosting settlement coordinates and population figures on a third-party free tier. Still pending; 04-CONTEXT.md D-06 gates the first real-data deploy on a blocking-human checkpoint.
 - [Phase 6] Open item — threshold values (household size range, target/population fraction, team-day distance). Blocks CONFIG-03, and Phase 7's POP-01, POP-02, TEAM-01, GEO-04. No published standard exists; must be supplied locally.
 - [Phase 6] Open item — whether a boundary-vintage failure counts toward the weighted score. Blocks ADVIS-01, GEO-03.
-- [Phase 03] Phase 3 was planned while Phase 2 plans 05/06 were still unexecuted; 03-01's precondition (B4/B5 registered, `mlos_corrected` snapshot in session state) is now satisfied. Plan line anchors into `app.py` may have shifted — executors must read the file, not trust the numbers.
-- [Phase 03] `app.py` is CRLF-terminated by design (restored in 90999a6 after edit tooling normalised it to LF). Executors editing it must preserve CRLF or a ~130-line change reads as a whole-file rewrite.
+- [All phases] `app.py` is CRLF-terminated by design (restored in 90999a6 after edit tooling normalised it to LF). Executors editing it must preserve CRLF or a ~130-line change reads as a whole-file rewrite.
 - [v2 / HIST-01] Generated `eha_guid` values are session-scoped (D-12): churn detection in a future history layer will see re-generation as churn. Accepted at a one-way gate; not a defect.
 - [Phase 02] Codebase map (`.planning/codebase/`) is stale by four top-level files (README.md, pytest.ini, requirements-dev.txt, `mlos_checkout_QC list.txt`); advisory only, refresh with `/gsd-map-codebase`.
 
@@ -150,6 +150,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:03:20.852Z
-Stopped at: Phase 4 context gathered; Phase 3 awaiting verification
+Last session: 2026-09-10T21:04:32.863Z
+Stopped at: Phase 03 complete, ready to plan Phase 04
 Resume file: .planning/phases/04-central-deployment-and-officer-identity/04-CONTEXT.md

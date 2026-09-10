@@ -52,18 +52,17 @@ defects inside several of them, and M1 corrects those without removing the capab
 - ✓ Blank values cannot satisfy cross-table match rules; six `.missing` findings report the blank side separately (F9) — Phase 2
 - ✓ Boundary reference fallback and absence are reported as failing checks `B4` and `B5`; canonical boundary order is B0 to B5 (F13) — Phase 2
 - ✓ pytest suite (108 tests) with a byte-level `.sqlite`/`.csv`/`.xlsx` golden fixture asserting identical check summaries across formats — Phase 2
+- ✓ Downloaded QC report covers all five layers: one combined QC Summary sheet with placeholder rows for unrun layers, a detail sheet per layer, and a cover verdict derived from all five via one shared `QcSummary` (F1) — Phase 3
+- ✓ Weighted score never rises because data was withheld: an unrun layer contributes 0 and the total is shown against its achievable maximum, e.g. `72.0% of 80.0% achievable` (F6) — Phase 3
+- ✓ Issue-row counts report distinct source rows per layer, shown with share of rows and the findings count, identical on screen, in the report and in the email (F8) — Phase 3
+- ✓ Email summary carries five layer blocks including Settlement, every check under layer headings, and the verdict in the subject, built by a pure function in `qc/report.py` (F11) — Phase 3
+- ✓ Raw-data and detail report sheets written as plain values with a styled header row only, proven by a `Cell.has_style` test (F12) — Phase 3
+- ✓ Boundary checks appear B0 to B5 in canonical order at every summary table and export, proven by a PYTHONHASHSEED-varied standing test; a four-site agreement test keeps verdict, score and headline identical everywhere (F14) — Phase 3
 
 ### Active
 
-**M1 — Trustworthy verdict.** Close the 14 audited defects, then build the seam that lets the
-rule set grow safely. Full audit: https://claude.ai/code/artifact/683128cf-bca1-4b57-9f73-81e171be893e
+**M1 — Trustworthy verdict.** All 14 audited defects are closed (Phases 1 to 3); M1 awaits milestone close-out. Full audit: https://claude.ai/code/artifact/683128cf-bca1-4b57-9f73-81e171be893e
 
-- [ ] Downloaded QC report covers all five layers, with its cover verdict derived from all of them (F1 — currently 2 of 5, so a failing file can download as "CLEAN")
-- [ ] Weighted score never rises because data was withheld (F6 — absent layers currently score 100%)
-- [ ] Issue-row counts report distinct rows, not rule-row pairs (F8)
-- [ ] Email summary covers all five layers, including Settlement (F11)
-- [ ] Raw-data report sheets written without per-cell styling (F12)
-- [ ] Boundary checks emitted in rule order B0, B1, B2, B3 (F14)
 
 **M2 — Central deployment.** Get it into officers' hands before growing the rule set.
 
@@ -143,6 +142,10 @@ F2 and F9 are unhandled consequences of it, not reasons to reverse it.
 | Generated `eha_guid` is a session-scoped `uuid4`, not content-derived | Satisfies "identical on first render and every rerun" with the simplest implementation. One-way: identifiers are not reproducible across sessions, so a cited ID cannot be regenerated. Confirmed at a blocking-human gate. | Done — Phase 2 (D-12) |
 | Submission identity is a sha256 over uploaded bytes; two frames (`mlos_raw`, `mlos_corrected`) kept, one guard | Filename-plus-size collides for templated monthly exports, a correctness defect under Core Value. The user wanted an as-submitted audit sheet in the report, accepting doubled peak memory. | Done — Phase 2 (D-13/D-14/D-15) |
 | Silent boundary-reference widening and absence become checks `B4` and `B5` | A check that appears only on failure carries no information by its absence; riding the checks list means screen, report and email pick it up with no signature change. | Done — Phase 2 (D-16 to D-19) |
+| One shared `QcSummary` computation (`qc/report.py`) read by banner, workbook, email and Generate Report tab | F1 was a second, divergent verdict derivation on the report cover; making all four presentation sites read one object, guarded by a four-site agreement test, removes the class of defect rather than the instance. | Done — Phase 3 (Pattern 1) |
+| Unrun layer earns 0 and the score is shown against its achievable maximum (`72.0% of 80.0% achievable`) | Renormalising weights would let withholding a file raise the score (F6). The user chose the visible ceiling over a bare capped number so the drop is explained where it appears. | Done — Phase 3 (D-01/D-02) |
+| One combined QC Summary sheet with placeholder rows, plus a detail sheet per layer | The user preferred a single ordered sheet over five summary pairs; the placeholder row keeps an unrun layer visible. Costly: the old `MLoS QC Summary` / `Takeoffpoint QC Summary` sheet names are gone. | Done — Phase 3 (D-06/D-07) |
+| Headline issue rows are the sum of per-layer distinct counts, shown with findings and share of rows | The user wanted a headline that reconciles by eye with the per-layer lines beneath it, over a cross-layer distinct count. | Done — Phase 3 (D-10 to D-13) |
 | Ship M2 (deployment) before M3 (new layers) | Officers get a trustworthy tool sooner. Holding deployment back for more rules delays the value M1 creates. | — Pending |
 
 ## Open Items
@@ -171,4 +174,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-10 after Phase 2*
+*Last updated: 2026-09-10 after Phase 3*

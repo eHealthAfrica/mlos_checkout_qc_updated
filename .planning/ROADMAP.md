@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: QC Engine Seam and Pinned Environment** - Unique rule identity, stable rule order, one pure `qc/` package, one known dependency set (completed 2026-09-10)
 - [x] **Phase 2: Detection Correctness and Three-Format Harness** - Same data, same findings, whatever format it arrived in (completed 2026-09-10)
-- [ ] **Phase 3: Verdict and Report Integrity** - Verdict, score, report and email describe every layer that ran
+- [x] **Phase 3: Verdict and Report Integrity** - Verdict, score, report and email describe every layer that ran (completed 2026-09-10)
 - [ ] **Phase 4: Central Deployment and Officer Identity** - One private Space URL, signed-in officers, no committed credentials
 - [ ] **Phase 5: Submission Record** - Append-only log of who checked what, when, with what verdict
 - [ ] **Phase 6: Threshold Configuration and Advisory Severity** - The tunable-threshold and severity-tier contract new layers plug into
@@ -274,7 +274,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
 | 2. Detection Correctness and Three-Format Harness | 6/6 | Complete    | 2026-09-10 |
-| 3. Verdict and Report Integrity | 4/4 | In Progress|  |
+| 3. Verdict and Report Integrity | 4/4 | Complete    | 2026-09-10 |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
 | 5. Submission Record | 0/TBD | Not started | - |
 | 6. Threshold Configuration and Advisory Severity | 0/TBD | Not started | - |
