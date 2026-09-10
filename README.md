@@ -215,7 +215,7 @@ Cross-table consistency checks between the Takeoffpoint and MLoS tables.
 
 ---
 
-### 7. Boundary Checks (Rules B0–B3)
+### 7. Boundary Checks (Rules B0–B5)
 
 Spatial and reference validation against the admin ward boundary dataset (9,410 wards).
 
@@ -225,8 +225,10 @@ Spatial and reference validation against the admin ward boundary dataset (9,410 
 | B1 | Ward Code — Boundary Reference | `ward_code` must exist in the boundary reference for the file's state(s) (only checked for rows with a non-null ward_code) |
 | B2 | Coordinates — Within Ward Boundary | `latitude`/`longitude` must fall within the bounding box of the declared `ward_code` |
 | B3 | State Name — Boundary Reference Match | `state_name` in MLoS must match the `state_name` the boundary reference assigns to the same `ward_code` |
+| B4 | Boundary Reference Fallback | Reports whether B1/B2 validated against the file's own state(s) or, on a fallback, against the full national reference |
+| B5 | Boundary Reference Unavailable | Reports when no boundary reference was found at all, so B1, B2, B3 and B4 could not run |
 
-**State filtering:** The boundary reference is pre-filtered by `state_name` (e.g. "Nasarawa", "Kano") matched case-insensitively against the uploaded file's `state_name` column. Fallback to the full 9,410-ward reference if no match is found.
+**State filtering:** The boundary reference is pre-filtered by `state_name` (e.g. "Nasarawa", "Kano") matched case-insensitively against the uploaded file's `state_name` column. The fallback to the full 9,410-ward reference still happens when no match is found, but it is no longer silent: it is reported as the `B4` check, which fails and names both `B1` and `B2` because the widening reassigns the state-filtered frames both rules read — B1's ward-code lookup and B2's bounding-box lookup alike. When the bundled reference files are unavailable entirely, `B1`, `B2`, `B3` and `B4` are all suppressed and a separate `B5` check reports the unavailability instead.
 
 **Boundary Issues tab** includes reference comparison columns:
 
