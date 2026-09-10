@@ -238,6 +238,86 @@ def build_takeoff_fixture() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["globalid", "name", "code", "wardcode"])
 
 
+def build_mlos_fixture_with_blanks() -> pd.DataFrame:
+    """Return a 3-row MLoS DataFrame carrying all 43 required columns, purpose-built to prove
+    INTEG-02's six ``.missing`` checks actually detect a blank rather than merely report zero
+    (Pitfall 2: the shared 10-row fixture has no genuinely blank cross-table cell). Separate
+    from ``build_mlos_fixture()`` per plan constraint — the shared fixture's row count and
+    content are frozen against ``tests/baseline/qc_baseline.json``.
+
+    - Row 0 ("Blank0") — the fully-passing anchor: ward 81110, takeoffpoint TP-A,
+      takeoffpoint_code TPC-A, matching ``build_takeoff_fixture_with_blanks()``'s row 0 on all
+      three cross-table columns.
+    - Row 1 ("Blank1") — carries three deliberately DIFFERENT absence forms in the three
+      cross-table columns, so a fix that only handles one form (e.g. only the empty string)
+      cannot pass this fixture's assertions: ``takeoffpoint`` is whitespace-only (``"   "``),
+      ``takeoffpoint_code`` is the case-insensitive sentinel ``"N/A"`` (D-04/D-05 — not the
+      exact literal ``"NA"``, which is exempted and stays present), ``ward_code`` is the empty
+      string. Fails ``2.missing``, ``3.missing`` and ``4.missing``; excluded from ``2``, ``3``
+      and ``4`` because an absent source cell can never satisfy or fail a match rule under the
+      Pattern-2 fix (INTEG-02).
+    - Row 2 ("Blank2") — mismatched but non-blank in all three cross-table columns, exercising
+      ``2``, ``3`` and ``4`` as ordinary match failures, structurally distinct from row 1's
+      absence failures.
+    """
+    rows = [
+        _row({
+            "settlement_name": "Blank0",
+            "master_id": "M-B001", "mlos_id": "ML-B001",
+            "eha_guid": "b1111111-1111-1111-1111-111111111111",
+            "settlementarea_globalid": "sga-b001",
+        }),
+        _row({
+            "settlement_name": "Blank1",
+            "takeoffpoint": "   ",       # whitespace-only absence form
+            "takeoffpoint_code": "N/A",  # case-insensitive sentinel absence form
+            "ward_code": "",             # empty-string absence form
+            "master_id": "M-B002", "mlos_id": "ML-B002",
+            "eha_guid": "b2222222-2222-2222-2222-222222222222",
+            "settlementarea_globalid": "sga-b002",
+        }),
+        _row({
+            "settlement_name": "Blank2",
+            "takeoffpoint": "Ghost-TP2",           # mismatched, non-blank -> rule 2
+            "takeoffpoint_code": "GHOST-CODE2",    # mismatched, non-blank -> rule 3
+            "ward_code": "00002",                  # mismatched, non-blank -> rule 4
+            "master_id": "M-B003", "mlos_id": "ML-B003",
+            "eha_guid": "b3333333-3333-3333-3333-333333333333",
+            "settlementarea_globalid": "sga-b003",
+        }),
+    ]
+    return pd.DataFrame(rows, columns=MLOS_REQUIRED_COLS)
+
+
+def build_takeoff_fixture_with_blanks() -> pd.DataFrame:
+    """Return a 3-row Takeoffpoint DataFrame, ``globalid`` first for the same
+    column-duplication-avoidance reason documented on ``build_takeoff_fixture()``'s docstring.
+    Pairs with ``build_mlos_fixture_with_blanks()`` to prove the TP2/TP3/TP4-side ``.missing``
+    checks and the R2/R3/R4-side ones agree with each other on a shared row set.
+
+    - Row 0 — matches row 0 of the MLoS blanks fixture on ``name``/``code``/``wardcode``
+      (``TP-A``/``TPC-A``/``81110``), with a valid ``globalid``.
+    - Row 1 — three absence forms, again deliberately different from each other and from row 1's
+      forms on the MLoS side, so no single-form fix can pass: ``name`` is the empty string,
+      ``code`` is whitespace-only, ``wardcode`` is the bare-hyphen sentinel (``"-"``). This row's
+      ``name`` (empty string) directly faces MLoS blanks row 1's ``takeoffpoint``
+      (whitespace-only) across the join — the literal blank-facing-blank pairing that silently
+      matched before the INTEG-02 fix (defect F9): both were absent, both entered no valid set,
+      and neither excluded the other, so the pre-fix code reported a clean reconciliation.
+    - Row 2 — an orphan, mismatched but non-blank on all three columns, with a valid
+      ``globalid``, exercising TP2/TP3/TP4 as ordinary match failures.
+    """
+    rows = [
+        {"globalid": "d1111111-1111-1111-1111-111111111111",
+         "name": "TP-A", "code": "TPC-A", "wardcode": FIXTURE_WARD_CODE},
+        {"globalid": "d2222222-2222-2222-2222-222222222222",
+         "name": "", "code": "   ", "wardcode": "-"},
+        {"globalid": "d3333333-3333-3333-3333-333333333333",
+         "name": "Orphan-TP2", "code": "ORPHAN-CODE2", "wardcode": "99998"},
+    ]
+    return pd.DataFrame(rows, columns=["globalid", "name", "code", "wardcode"])
+
+
 def load_boundary_fixtures() -> "tuple[pd.DataFrame, pd.DataFrame]":
     """Load the two bundled boundary reference CSVs exactly as ``load_boundary_refs`` does at
     ``app.py:371`` — ``dtype=str``, ``keep_default_na=False``, with the four bbox coordinate
