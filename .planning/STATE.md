@@ -1,44 +1,44 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 02
-current_phase_name: Detection Correctness and Three-Format Harness
-status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-09-10T18:13:41.635Z"
+current_phase: 03
+current_phase_name: Verdict and Report Integrity
+status: planning
+stopped_at: Phase 02 complete, ready to plan Phase 03
+last_updated: "2026-09-10T18:36:07.381Z"
 last_activity: 2026-09-10
-last_activity_desc: Phase 02 execution started
-state_head: 90999a6ec8250d2bb550953236ac42962553eed6
+last_activity_desc: Phase 02 complete, transitioned to Phase 03
+state_head: ae7389929fa9ddeed8f5932fcabebc2a6d129e0d
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 16
   completed_plans: 12
-  percent: 14
+  percent: 29
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-09)
+See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** A file this tool calls clean is clean.
-**Current focus:** Phase 02 — Detection Correctness and Three-Format Harness
+**Current focus:** Phase 03 — Verdict and Report Integrity (planned, 4 plans, ready to execute)
 
 ## Current Position
 
-Phase: 02 (Detection Correctness and Three-Format Harness) — EXECUTING
-Plan: 4 of 6
-Status: Ready to execute
-Last activity: 2026-09-10 — Phase 02 execution started
+Phase: 03 — Verdict and Report Integrity
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-10 — Phase 02 complete, transitioned to Phase 03
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 12
 - Average duration: —
 - Total execution time: —
 
@@ -47,6 +47,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
+| 02 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -121,7 +122,10 @@ None yet.
 - [Phase 4] Open item — data-governance sign-off for hosting settlement coordinates and population figures on a third-party free tier. Named decision required before DEPLOY-01 rollout.
 - [Phase 6] Open item — threshold values (household size range, target/population fraction, team-day distance). Blocks CONFIG-03, and Phase 7's POP-01, POP-02, TEAM-01, GEO-04. No published standard exists; must be supplied locally.
 - [Phase 6] Open item — whether a boundary-vintage failure counts toward the weighted score. Blocks ADVIS-01, GEO-03.
-- [Phase 01] WINDOWS.md #1 (open, deviation): Task 1's acceptance criterion 'grep -c VALID_ACC app.py reports 1' is unsatisfiable until plan 04 relocates run_mlos_qc out of app.py — VALID_ACC still has a legitimate non-import usage there.
+- [Phase 03] Phase 3 was planned while Phase 2 plans 05/06 were still unexecuted; 03-01's precondition (B4/B5 registered, `mlos_corrected` snapshot in session state) is now satisfied. Plan line anchors into `app.py` may have shifted — executors must read the file, not trust the numbers.
+- [Phase 03] `app.py` is CRLF-terminated by design (restored in 90999a6 after edit tooling normalised it to LF). Executors editing it must preserve CRLF or a ~130-line change reads as a whole-file rewrite.
+- [v2 / HIST-01] Generated `eha_guid` values are session-scoped (D-12): churn detection in a future history layer will see re-generation as churn. Accepted at a one-way gate; not a defect.
+- [Phase 02] Codebase map (`.planning/codebase/`) is stale by four top-level files (README.md, pytest.ini, requirements-dev.txt, `mlos_checkout_QC list.txt`); advisory only, refresh with `/gsd-map-codebase`.
 
 ## Deferred Items
 
@@ -134,5 +138,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-10T18:13:41.585Z
-Stopped at: Completed 02-06-PLAN.md
+Stopped at: Phase 02 complete, ready to plan Phase 03
 Resume file: None

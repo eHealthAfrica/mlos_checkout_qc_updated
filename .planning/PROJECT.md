@@ -45,6 +45,13 @@ defects inside several of them, and M1 corrects those without removing the capab
 - ✓ Report row order reproducible across app restarts, proven by a subprocess test comparing raw bytes under three differing `PYTHONHASHSEED` values (F10) — Phase 1
 - ✓ All five QC layers extracted to a `qc/` package that imports with Streamlit absent, enforced by a test — Phase 1
 - ✓ Dependencies pinned with upper bounds; `pandas==3.0.5` exact and `numpy` explicitly declared — Phase 1
+- ✓ Rule 1 detects missing values identically across SQLite, CSV and Excel — one `vec_is_absent` predicate with a uniform sentinel list, `"NA"` exempted case-sensitively (F2) — Phase 2
+- ✓ One frame of record: `mlos_raw` / `mlos_corrected` held under distinct session keys, every consumer reads the corrected snapshot, guarded by a standing AST test (F4) — Phase 2
+- ✓ Auto-correction runs exactly once per submission, keyed by a sha256 of the uploaded bytes; generated `eha_guid` values are session-scoped `uuid4` reused for every render and the download (F5) — Phase 2
+- ✓ Column names normalised once at load by one typographic helper on all three officer-supplied paths; renames shown on screen and in a Columns Renamed report sheet; header collisions fail a new `S3` check (F7) — Phase 2
+- ✓ Blank values cannot satisfy cross-table match rules; six `.missing` findings report the blank side separately (F9) — Phase 2
+- ✓ Boundary reference fallback and absence are reported as failing checks `B4` and `B5`; canonical boundary order is B0 to B5 (F13) — Phase 2
+- ✓ pytest suite (108 tests) with a byte-level `.sqlite`/`.csv`/`.xlsx` golden fixture asserting identical check summaries across formats — Phase 2
 
 ### Active
 
@@ -52,18 +59,11 @@ defects inside several of them, and M1 corrects those without removing the capab
 rule set grow safely. Full audit: https://claude.ai/code/artifact/683128cf-bca1-4b57-9f73-81e171be893e
 
 - [ ] Downloaded QC report covers all five layers, with its cover verdict derived from all of them (F1 — currently 2 of 5, so a failing file can download as "CLEAN")
-- [ ] Rule 1 detects missing values identically across SQLite, CSV and Excel (F2 — currently cannot fail on CSV or Excel)
-- [ ] One frame of record: displayed data and computed checks never describe different versions of the file (F4)
-- [ ] Auto-correction runs once, deterministically — no regenerated GUIDs between QC and download (F5)
 - [ ] Weighted score never rises because data was withheld (F6 — absent layers currently score 100%)
-- [ ] Column names normalised once at load, so schema alignment and the rules agree on what a column is called (F7)
 - [ ] Issue-row counts report distinct rows, not rule-row pairs (F8)
-- [ ] Blank values cannot satisfy cross-table match rules (F9 — affects R2/R3/R4 and TP2/TP3/TP4)
 - [ ] Email summary covers all five layers, including Settlement (F11)
 - [ ] Raw-data report sheets written without per-cell styling (F12)
-- [ ] Boundary reference fallback surfaces as a visible warning instead of silently widening to all states (F13)
 - [ ] Boundary checks emitted in rule order B0, B1, B2, B3 (F14)
-- [ ] pytest suite covering all rules, with a three-format golden fixture (`qc/` package and harness landed in Phase 1; rule-complete coverage and the .sqlite/.csv/.xlsx fixture remain)
 
 **M2 — Central deployment.** Get it into officers' hands before growing the rule set.
 
@@ -138,6 +138,11 @@ F2 and F9 are unhandled consequences of it, not reasons to reverse it.
 | Private HF Dataset repo for the submission log | Keeps the whole deployment on one platform with one credential set, and gives git-versioned history for free. No external database to operate or monitor for idle-pausing. | — Pending |
 | Longitudinal layer deferred to v2 | The only proposed layer requiring retained submission history. Deferring it keeps the QC engine stateless, which is the largest available simplification. | — Pending |
 | Extract to `qc/` + pytest inside M1, not M3 | Three new layers means substantial new rule code. There is currently no seam to add it against and nothing to catch a regression. | Done — Phase 1. Five layers behind `qc/`, 310 lines out of `app.py`, 34 standing tests, every relocation checked against a frozen pre-extraction baseline. |
+| Uniform absence sentinel list (`null`, `none`, `n/a`, `nan`, `-`, blanks, whitespace) applied to every column, exact `"NA"` exempted | `keep_default_na=False` is correct but leaves CSV/XLSX blanks as `""`, which `isnull()` reports as present; one predicate for every rule keeps detection format-independent. Costly to change later: it moves the failing-row count on Rule 1, six `.missing` findings and B0 at once. | Done — Phase 2 (D-04/D-05) |
+| Blank cells become their own `.missing` findings rather than being suppressed from match rules | A data-entry gap and a reconciliation failure are different problems for the officer; layers report overlap independently and Phase 3 fixes the row double-count instead. | Done — Phase 2 (D-01, D-03) |
+| Generated `eha_guid` is a session-scoped `uuid4`, not content-derived | Satisfies "identical on first render and every rerun" with the simplest implementation. One-way: identifiers are not reproducible across sessions, so a cited ID cannot be regenerated. Confirmed at a blocking-human gate. | Done — Phase 2 (D-12) |
+| Submission identity is a sha256 over uploaded bytes; two frames (`mlos_raw`, `mlos_corrected`) kept, one guard | Filename-plus-size collides for templated monthly exports, a correctness defect under Core Value. The user wanted an as-submitted audit sheet in the report, accepting doubled peak memory. | Done — Phase 2 (D-13/D-14/D-15) |
+| Silent boundary-reference widening and absence become checks `B4` and `B5` | A check that appears only on failure carries no information by its absence; riding the checks list means screen, report and email pick it up with no signature change. | Done — Phase 2 (D-16 to D-19) |
 | Ship M2 (deployment) before M3 (new layers) | Officers get a trustworthy tool sooner. Holding deployment back for more rules delays the value M1 creates. | — Pending |
 
 ## Open Items
@@ -166,4 +171,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-10 after Phase 1*
+*Last updated: 2026-09-10 after Phase 2*
