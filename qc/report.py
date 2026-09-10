@@ -462,11 +462,16 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
         ws_d["A1"].alignment = ctr
         ws_d.row_dimensions[1].height = 26
         hdr_row(ws_d, 2, list(detail_df.columns))
-        for ri, (_, row) in enumerate(detail_df.iterrows(), 3):
-            for ci, v in enumerate(row.values, 1):
-                c = ws_d.cell(row=ri, column=ci, value=v)
-                c.font=body_font; c.border=bdr; c.alignment=lft
-                if ri % 2 == 0: c.fill = PatternFill("solid", fgColor="FFF5F5")
+        # ENGINE-08/D-09: plain bulk append, no per-cell style of any kind (no font, border,
+        # alignment or zebra fill) -- a detail sheet grows with failures exactly as a raw sheet
+        # grows with rows, so the same free-tier memory constraint applies (PROJECT.md). Per-
+        # cell style assignment lazily allocates a StyleArray per cell; measured at roughly
+        # twelve times the cost of a plain append over 36,000 cells (03-RESEARCH.md). The
+        # absence is proven by reading each cell's own has_style flag after a save/reload round
+        # trip (tests/test_no_per_cell_styling.py), so the guarantee survives serialisation
+        # rather than being an in-memory-only artefact.
+        for _, row in detail_df.iterrows():
+            ws_d.append(row.tolist())
         for ci in range(1, nc+1):
             mx = max(len(str(detail_df.columns[ci-1])),
                      max((len(str(v)) for v in detail_df.iloc[:, ci-1].astype(str)), default=0))
@@ -477,11 +482,10 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
         ws_r.sheet_view.showGridLines = False
         if df.empty: return
         hdr_row(ws_r, 1, list(df.columns))
-        for ri, (_, row) in enumerate(df.iterrows(), 2):
-            for ci, v in enumerate(row.values, 1):
-                c = ws_r.cell(row=ri, column=ci, value=v)
-                c.font=body_font; c.border=bdr; c.alignment=lft
-                if ri % 2 == 0: c.fill = lgry_fill
+        # ENGINE-08/D-09: plain bulk append, no per-cell style of any kind -- see write_detail's
+        # comment above for the rationale and the measured cost this avoids.
+        for _, row in df.iterrows():
+            ws_r.append(row.tolist())
         for ci in range(1, len(df.columns)+1):
             ws_r.column_dimensions[get_column_letter(ci)].width = 18
 
