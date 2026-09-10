@@ -17,7 +17,7 @@ backstop (D-12).
 import pandas as pd
 
 from .domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
-from .predicates import pct, vec_is_uuid, vec_is_editor
+from .predicates import pct, vec_is_uuid, vec_is_editor, vec_is_absent
 from .results import register
 
 register("1", "MLoS", "Required Fields — Not Null", "All schema NOT NULL fields must not be empty")
@@ -89,7 +89,15 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
         "timestamp", "eha_guid", "settlementarea_globalid",
     ] if c in mlos.columns]
     if _NOT_NULL_COLS:
-        _null_mask = mlos[_NOT_NULL_COLS].isnull().any(axis=1)
+        # D-04/D-05: absence, not just SQL NULL — vec_is_absent also catches the empty-string and
+        # whitespace-only cells CSV/XLSX blanks arrive as under keep_default_na=False, which
+        # .isnull() alone missed (F2/INTEG-01). One boolean frame, keyed by column name, built
+        # once and reused for both the failing-row mask and the "Null Fields" detail column below
+        # — never re-derived per row, so the two can never disagree with each other.
+        _absent_frame = pd.concat(
+            [vec_is_absent(mlos[c]) for c in _NOT_NULL_COLS], axis=1, keys=_NOT_NULL_COLS,
+        )
+        _null_mask = _absent_frame.any(axis=1)
         _n1 = int(_null_mask.sum())
         checks.append({
             "Rule#": "1", "QC Check": "Required Fields — Not Null",
@@ -103,8 +111,8 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
             _sub1 = mlos[_null_mask][_cols1].copy()
             _sub1.insert(0, "Rule#", "1")
             _sub1.insert(1, "Rule", "Required Fields — Not Null")
-            _sub1["Null Fields"] = mlos[_null_mask][_NOT_NULL_COLS].apply(
-                lambda row: ", ".join(col for col in _NOT_NULL_COLS if pd.isna(row[col])),
+            _sub1["Null Fields"] = _absent_frame[_null_mask].apply(
+                lambda row: ", ".join(col for col in _NOT_NULL_COLS if row[col]),
                 axis=1,
             )
             details.append(_sub1)

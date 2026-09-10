@@ -14,6 +14,15 @@ import re
 VALID_DAY   = {"1","1_2","1_2_3","1_2_3_4","2","2_3","2_3_4","3","3_4","4","NA"}
 VALID_YN_NA = {"Y","N","NA"}
 VALID_YN    = {"Y","N"}
+# Absence sentinel tokens (D-04, D-05): a value is absent when it is pandas NA/None/NaN, the
+# empty string, whitespace-only, or one of these five case-insensitive tokens. Matching is
+# case-insensitive against a stripped, lower-cased projection of the cell — except the exact
+# literal "NA", which is exempted case-sensitively in qc.predicates.vec_is_absent, because "NA"
+# is simultaneously a valid flag value in every FLAG_COLS column and Nasarawa's state_code.
+# Lowercase "na" is not a member of this set and is therefore not swept up as absent either — it
+# survives for a different reason than "NA" does (it is simply not one of these five tokens,
+# distinct from "nan"), not because of the exemption.
+ABSENCE_SENTINELS = frozenset({"null", "none", "n/a", "nan", "-"})
 VALID_ACC   = {"Fully Accessible","Partially Accessible","Inaccessible"}
 VALID_HAB   = {"Abandoned","Migrated","Inhabited","Partially Inhabited"}
 UUID_RE     = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
