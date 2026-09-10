@@ -1,5 +1,9 @@
 """Parity harness: prove an extracted qc/ layer produces exactly what the frozen pre-extraction
-baseline recorded (tests/baseline/qc_baseline.json).
+baseline recorded (tests/baseline/qc_baseline.json) — for the identifiers the baseline itself
+knew about. From Phase 2 onward the baseline is a **partial**, not total, oracle: it was captured
+before D-04's absence predicate existed and before this phase's nine new rule identifiers were
+registered, so a live layer is allowed to disagree with it in two declared ways without that
+being a regression — see ``MOVED_CHECKS`` and ``_assert_new_identifiers_are_registered`` below.
 
 Exposes normalisation helpers plans 04, 05 and 06 reuse as they add their own layers' parity
 tests: ``normalize_checks`` (sorts a checks list the same way capture_baseline.py's ``_layer()``
@@ -11,6 +15,14 @@ column-union across rules with different ``extra`` columns; Settlement, Takeoffp
 Boundary all hit the latter case). This file adds one test function per extracted layer; do not
 build a parameterised table over layers that do not exist yet in qc/, which would either skip or
 fail for layers still living in app.py.
+
+Per planner decision 4 (02-01-PLAN.md), this is the only plan that edits this file. Plans 02
+through 05 register new rule identifiers of their own (the six ``.missing`` checks, ``S3``,
+``B4``, ``B5``) and assert them in their own new test files — never here. What makes that
+possible is ``_assert_checks_match_baseline``'s scoping: it compares a layer's live checks against
+the baseline only for identifiers the baseline itself carries, and merely asserts that any live
+identifier the baseline does not carry is at least a registered rule (``qc.canonical_order()``),
+so a stray *unregistered* check still fails here even though a *new, registered* one does not.
 """
 
 import json
@@ -43,20 +55,50 @@ def normalize_detail(detail: "pd.DataFrame") -> list:
     return sorted(records, key=lambda r: tuple(str(r[c]) for c in columns))
 
 
+def _split_by_baseline_ids(actual_checks: list, baseline_checks: list) -> "tuple[list, list]":
+    """Split a live layer's checks into those whose Rule# the frozen baseline carries, and those
+    registered since — both groups keep their original relative order."""
+    baseline_ids = {c["Rule#"] for c in baseline_checks}
+    in_baseline = [c for c in actual_checks if c["Rule#"] in baseline_ids]
+    new_since_baseline = [c for c in actual_checks if c["Rule#"] not in baseline_ids]
+    return in_baseline, new_since_baseline
+
+
+def _assert_new_identifiers_are_registered(layer_name: str, new_checks: list):
+    """A live identifier the baseline never carried is only exempt from the field-by-field
+    baseline comparison, not from existing at all: it must still be a registered rule identifier,
+    so a check emitted under a stray, unregistered ``Rule#`` still fails here."""
+    canonical = set(qc.canonical_order())
+    for c in new_checks:
+        assert c["Rule#"] in canonical, (
+            f"{layer_name}: check {c.get('QC Check')!r} emitted under identifier "
+            f"{c['Rule#']!r}, which is absent from the frozen baseline AND not in "
+            f"qc.canonical_order() — a Phase 2+ addition must be a registered rule identifier, "
+            f"not merely undocumented in the baseline"
+        )
+
+
 def _assert_checks_match_baseline(layer_name: str, actual_checks: list, expected_checks: list):
-    """Compare two normalised checks lists field-by-field, naming which field of which check
-    diverged — the value of this assertion is entirely in how fast it points at the cause."""
-    assert len(actual_checks) == len(expected_checks), (
-        f"{layer_name}: expected {len(expected_checks)} checks in the baseline, "
-        f"got {len(actual_checks)} from the extracted layer"
+    """Compare a layer's live checks against the baseline, scoped to the intersection of
+    identifiers the baseline itself carries (planner decision 4): only those are compared
+    field-by-field; anything registered since must merely be a real registered identifier (see
+    ``_assert_new_identifiers_are_registered``). Field-by-field divergence messages name which
+    field of which check diverged — the value of this assertion is entirely in how fast it
+    points at the cause."""
+    in_baseline, new_since_baseline = _split_by_baseline_ids(actual_checks, expected_checks)
+
+    assert len(in_baseline) == len(expected_checks), (
+        f"{layer_name}: expected {len(expected_checks)} in-baseline checks, "
+        f"got {len(in_baseline)} from the extracted layer"
     )
-    for i, (actual, expected) in enumerate(zip(actual_checks, expected_checks)):
+    for i, (actual, expected) in enumerate(zip(in_baseline, expected_checks)):
         for field in CHECK_FIELDS:
             assert actual.get(field) == expected.get(field), (
                 f"{layer_name} check #{i} ({actual.get('QC Check')!r}): field {field!r} "
                 f"diverged from baseline — actual={actual.get(field)!r} "
                 f"expected={expected.get(field)!r}"
             )
+    _assert_new_identifiers_are_registered(layer_name, new_since_baseline)
 
 
 def test_schema_layer_matches_baseline(mlos_df, takeoff_df):
@@ -104,6 +146,22 @@ RENAMED_IDENTIFIERS = {
 _OLD_ID_BY_NAME = {
     name: ("11" if new_id.startswith("11.") else "12")
     for name, new_id in RENAMED_IDENTIFIERS.items()
+}
+
+# Planner decision 4: identifiers whose baseline field values Phase 2 deliberately moves,
+# declared once with the requirement and decision that moved them. Applied as an override onto
+# the expected baseline record before comparison, rather than requiring a second frozen JSON.
+# The single entry this task creates: D-04's absence predicate (qc.predicates.vec_is_absent) now
+# also catches the CSV/XLSX-style blank cell (empty string, whitespace-only) that ``.isnull()``
+# alone missed, so the unmodified 10-row fixture's row 2 (master_id M-0003, Bravo, blank
+# latitude/longitude) now also fails Rule 1 alongside row 1 (master_id M-0002, Alpha, null
+# timestamp) — Failing Rows moves from the baseline's 1 to 2, and Fail % from "10.0%" to "20.0%".
+MOVED_CHECKS = {
+    "Required Fields — Not Null": {
+        "fields": {"Failing Rows": 2, "Fail %": "20.0%"},
+        "requirement": "INTEG-01",
+        "decision": "D-04",
+    },
 }
 
 
@@ -158,14 +216,24 @@ def test_mlos_layer_matches_baseline(mlos_df, takeoff_df):
     expected_by_name = {c["QC Check"]: c for c in expected_checks}
     actual_by_name = {c["QC Check"]: c for c in checks}
 
-    assert set(actual_by_name) == set(expected_by_name), (
-        f"mlos: check-name sets diverged from baseline — "
-        f"actual-only={set(actual_by_name) - set(expected_by_name)!r} "
-        f"expected-only={set(expected_by_name) - set(actual_by_name)!r}"
+    # Decision 4's in-baseline scoping, by name rather than by Rule# (mlos's check names are
+    # unaffected by the R11/R12 rename and are unique, unlike a bare identifier a later plan might
+    # reuse in a different layer): every baseline name must still be emitted; a name the baseline
+    # never carried is exempt from the field comparison below but must still be a registered
+    # identifier, so plans 02-05 can add mlos identifiers without this file needing another edit.
+    missing_from_actual = set(expected_by_name) - set(actual_by_name)
+    assert not missing_from_actual, (
+        f"mlos: baseline check name(s) no longer emitted by the live layer: "
+        f"{sorted(missing_from_actual)!r}"
     )
+    new_since_baseline = [c for c in checks if c["QC Check"] not in expected_by_name]
+    _assert_new_identifiers_are_registered("mlos", new_since_baseline)
 
     for name, expected in expected_by_name.items():
         actual = actual_by_name[name]
+        expected = dict(expected)
+        if name in MOVED_CHECKS:
+            expected.update(MOVED_CHECKS[name]["fields"])
         if name in RENAMED_IDENTIFIERS:
             expected_new_id = RENAMED_IDENTIFIERS[name]
             assert actual["Rule#"] == expected_new_id, (
@@ -181,12 +249,35 @@ def test_mlos_layer_matches_baseline(mlos_df, takeoff_df):
                 f"actual={actual.get(field)!r} expected={expected.get(field)!r}"
             )
 
-    actual_detail = _nan_safe(_actual_mlos_detail_with_baseline_ids(detail))
-    expected_detail = _nan_safe(BASELINE["mlos"]["detail"])
+    # Decision 4: the same in-baseline filter applied to both sides of the detail comparison, and
+    # Rule 1's own detail rows excluded from it entirely — its row count and content moved under
+    # D-04 by construction, so a generic diff against the frozen baseline would only ever fail.
+    # Rule 1 gets one explicit hand-derived assertion instead, immediately below.
+    baseline_check_ids = {c["Rule#"] for c in expected_checks}  # baseline's own (old) identifiers
+    detail_id_scope = baseline_check_ids - {"1"}
+    adjusted_actual_detail = _actual_mlos_detail_with_baseline_ids(detail)
+    actual_detail = _nan_safe([r for r in adjusted_actual_detail if r["Rule#"] in detail_id_scope])
+    expected_detail = _nan_safe(
+        [r for r in BASELINE["mlos"]["detail"] if r.get("Rule#") in detail_id_scope]
+    )
     assert actual_detail == expected_detail, (
         f"mlos detail records diverged from baseline (after normalising the eleven renamed "
-        f"checks' Rule# back to the baseline's bare identifier): "
+        f"checks' Rule# back to the baseline's bare identifier, and excluding Rule 1's own rows): "
         f"actual={actual_detail!r} expected={expected_detail!r}"
+    )
+
+    # Rule 1's BASE column set (state_code, state_name, lga_name, ward_code, settlement_name,
+    # takeoffpoint, takeoffpoint_code) plus _NOT_NULL_COLS never includes master_id, so eha_guid
+    # — unique per fixture row and present via _NOT_NULL_COLS — is the identifying key here.
+    rule1_detail = detail[detail["Rule#"] == "1"] if not detail.empty else detail
+    rule1_by_eha_guid = {row["eha_guid"]: row["Null Fields"] for _, row in rule1_detail.iterrows()}
+    expected_rule1 = {
+        "22222222-2222-2222-2222-222222222222": "timestamp",           # M-0002, Alpha
+        "33333333-3333-3333-3333-333333333333": "latitude, longitude",  # M-0003, Bravo
+    }
+    assert rule1_by_eha_guid == expected_rule1, (
+        f"Rule 1 detail rows diverged from the hand-derived INTEG-01/D-04 expectation: "
+        f"actual={rule1_by_eha_guid!r} expected={expected_rule1!r}"
     )
 
 
