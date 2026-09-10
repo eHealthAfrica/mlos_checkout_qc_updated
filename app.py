@@ -326,7 +326,7 @@ def build_corrected_excel(df: pd.DataFrame) -> bytes:
 
 # ─── Excel Report Builder ─────────────────────────────────────────────────────────
 def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
-                        mlos_df, takeoff_df):
+                        mlos_df, takeoff_df, column_renames=None):
     out = BytesIO()
     wb  = openpyxl.Workbook()
 
@@ -461,6 +461,30 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
     write_detail (wb.create_sheet("Takeoffpoint Issue Detail"),"Takeoffpoint Table — Detailed Issues",  tp_detail)
     write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_df)
     write_raw    (wb.create_sheet("Raw Takeoffpoint Data"),  takeoff_df)
+
+    # ── Columns Renamed (INTEG-03/D-11) ───────────────────────────────────────────
+    # Reported in exactly two places: this sheet and the on-screen expander (Tab 1). No
+    # Pass/Fail, no rule identifier, no score weight — a rename is not a defect. A clean
+    # submission (nothing renamed) gets no sheet at all, not an empty one.
+    if column_renames:
+        ws_r = wb.create_sheet("Columns Renamed")
+        ws_r.sheet_view.showGridLines = False
+        ws_r.merge_cells("A1:B1")
+        ws_r["A1"].value     = "Columns Renamed at Load"
+        ws_r["A1"].font      = Font(bold=True, size=12, color=WHT, name="Calibri")
+        ws_r["A1"].fill      = PatternFill("solid", fgColor=BLU)
+        ws_r["A1"].alignment = ctr
+        ws_r.row_dimensions[1].height = 26
+        hdr_row(ws_r, 2, ["Original Header", "Resolved To"])
+        for ri, (orig, resolved) in enumerate(sorted(column_renames.items()), 3):
+            c1 = ws_r.cell(row=ri, column=1, value=orig)
+            c2 = ws_r.cell(row=ri, column=2, value=resolved)
+            for c in (c1, c2):
+                c.font = body_font; c.border = bdr; c.alignment = lft
+                if ri % 2 == 0:
+                    c.fill = lgry_fill
+        ws_r.column_dimensions["A"].width = 32
+        ws_r.column_dimensions["B"].width = 32
 
     wb.save(out)
     return out.getvalue()
@@ -949,6 +973,23 @@ with tab1:
         log_df = pd.DataFrame(correction_log)
         st.dataframe(log_df, use_container_width=True, hide_index=True)
 
+    # ── Columns renamed at load (INTEG-03/D-11) ───────────────────────────────────
+    # Reported in exactly two places: this expander and the report's "Columns Renamed" sheet.
+    # A rename is not a defect — no Pass/Fail, no rule identifier, no score weight — so a clean
+    # submission (nothing renamed) shows no panel at all, not an empty one.
+    _column_renames = st.session_state.get("column_renames")
+    if _column_renames:
+        with st.expander("🏷️ Columns renamed at load", expanded=False):
+            _rename_rows = sorted(_column_renames.items(), key=lambda kv: kv[0])
+            _rename_df = pd.DataFrame(_rename_rows, columns=["Original Header", "Resolved To"])
+            st.dataframe(_rename_df, use_container_width=True, hide_index=True)
+            st.caption("A rename is not a defect and does not affect the weighted QC score.")
+            if st.session_state.get("column_collisions"):
+                st.caption(
+                    "One or more header pairs could not be safely renamed because they "
+                    "collided — see the **S3** row of the Schema Alignment summary above."
+                )
+
     st.markdown("---")
     st.markdown("**📥 Download Full MLoS Data (with Auto Corrections)**")
     st.caption(
@@ -1261,13 +1302,16 @@ with tab8:
 
     # Download
     st.markdown("**📥 Download Full QC Report**")
-    st.caption("7-sheet Excel report: Cover Page · MLoS QC Summary · MLoS Issue Detail · "
-               "Takeoffpoint QC Summary · Takeoffpoint Issue Detail · Raw MLoS Data · Raw Takeoffpoint Data")
+    st.caption("Excel report: Cover Page · MLoS QC Summary · MLoS Issue Detail · "
+               "Takeoffpoint QC Summary · Takeoffpoint Issue Detail · Raw MLoS Data · "
+               "Raw Takeoffpoint Data · Columns Renamed (only present when a header was "
+               "renamed at load)")
 
     with st.spinner("Building Excel report…"):
         report_bytes = build_excel_report(
             filename, mlos_checks, mlos_detail,
-            tp_checks, tp_detail, mlos_df, takeoff_df)
+            tp_checks, tp_detail, mlos_df, takeoff_df,
+            column_renames=st.session_state.get("column_renames", {}))
 
     report_file = filename.replace(".sqlite","").replace(".db","") + "_QC_Report.xlsx"
     st.download_button(
