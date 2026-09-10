@@ -5,8 +5,8 @@ app, which imports the UI framework and makes ENGINE-05 unachievable.
 The one deliberate change (D-10's first level): ``YN_NA_COLS`` becomes a tuple in the order
 highrisk, slums, densely_populated, hard2reach, border, nomadic, riverine, fulani — matching the
 convention this repository already set for itself in the adjacent ``FLAG_COLS`` list, per D-11.
-A set literal at that position was the anomaly; a registry-declared order (qc/__init__.py's
-``sort_by_registry``) is the load-bearing backstop, per D-12.
+A set literal at that position was the anomaly; a registry-declared order (the re-sort helper
+qc/__init__.py exposes) is the load-bearing backstop, per D-12.
 """
 
 import re
