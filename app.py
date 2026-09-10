@@ -616,6 +616,8 @@ with st.sidebar:
 | B1 | ward_code exists in admin ward boundary reference (9,410 wards) |
 | B2 | latitude/longitude falls within the bounding box of the declared ward_code |
 | B3 | state_name in MLoS matches the state_name assigned to that ward_code in the boundary reference |
+| B4 | reports whether B1/B2 validated against the file's own state or, on a fallback, against the full national reference |
+| B5 | reports when no boundary reference was found — B1, B2, B3 and B4 could not run |
         """)
     st.markdown("---")
     st.caption("eHealth Africa · MLOS QC Tool · v1.1")
@@ -648,7 +650,7 @@ It overrides the built-in Takeoffpoint sheet for Excel/SQLite files.
 - 🔎 **Schema Alignment** (S1–S2) — verifies all required columns are present
 - 🏘️ **MLoS Rules** (2–17) — data integrity checks
 - 📍 **Takeoffpoint Rules** (TP2–TP5) — 4 cross-table checks
-- 🗺️ **Boundary Checks** (B0–B3) — ward code, coordinate, and state name validation against admin boundary reference
+- 🗺️ **Boundary Checks** (B0–B5) — ward code, coordinate, and state name validation against admin boundary reference, plus reference fallback (B4) and availability (B5) reporting
 
 **Outputs:**
 - Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score on the dashboard

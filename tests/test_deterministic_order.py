@@ -113,7 +113,13 @@ def test_registry_sorted_order_is_stable_across_hash_seeds():
         f"{[_identifiers_from(o) for o in outputs]!r}"
     )
 
-    expected_order = qc.canonical_order()
+    # B5 (INTEG-04, D-18) is defined by the boundary reference's *absence* -- a state this
+    # snippet's fixture, which always loads the real bundled reference, can never be in. It is
+    # therefore the one registered identifier this full-registry comparison can never see
+    # emitted here; tests/test_registry_covers_emitted_ids.py covers B5 via its own
+    # reference-absent scenario. Excluding it here keeps this test's real purpose —
+    # cross-process order stability — intact without claiming full-registry coverage.
+    expected_order = [rule_id for rule_id in qc.canonical_order() if rule_id != "B5"]
     actual_ids = _identifiers_from(outputs[0])
     assert actual_ids == expected_order, (
         f"registry-sorted identifier sequence diverges from canonical_order(): "

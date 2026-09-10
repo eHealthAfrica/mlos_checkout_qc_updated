@@ -19,7 +19,7 @@ keeps a file missing that column from crashing the run.
 
 import pandas as pd
 
-from .predicates import pct
+from .predicates import pct, vec_is_absent
 from .results import register
 
 register("B0", "Boundary", "Ward Code — Not Available on Data",
@@ -31,6 +31,13 @@ register("B2", "Boundary", "Coordinates — Ward Boundary Intersection",
          "(ward_code of the intersecting boundary must equal the declared ward_code)")
 register("B3", "Boundary", "State Name — Boundary Reference Match",
          "state_name in MLoS must match the state_name assigned to the ward_code in the boundary reference")
+register("B4", "Boundary", "Boundary Reference Fallback",
+         "reports whether B1 and B2 validated against the file's own state(s) or, on a "
+         "fallback, against the full national reference because state-name filtering "
+         "matched no ward (INTEG-04, D-16/D-17)")
+register("B5", "Boundary", "Boundary Reference Unavailable",
+         "reports when no boundary reference was found at all, so B1, B2, B3 and B4 could "
+         "not run (INTEG-04, D-18)")
 
 
 def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.DataFrame):
@@ -86,16 +93,43 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.D
                 filtered_bbox["ward_code"].astype(str).str.strip().isin(state_ward_set)
             ]
 
+    # B4 (INTEG-04, D-16/D-17): capture the fallback as a boolean, and the state-filtered
+    # ward count, at this site — before the reassignment below destroys both. The trigger is
+    # emptiness of the state-filtered result, not a size comparison against the national set.
+    fallback_fired = filtered_ref.empty and not ref_df.empty
+    pre_fallback_ward_count = (
+        int(filtered_ref["ward_code"].dropna().astype(str).str.strip().nunique())
+        if not filtered_ref.empty and "ward_code" in filtered_ref.columns
+        else 0
+    )
+
     # Fallback to full reference if state_name filtering yields nothing
     if filtered_ref.empty and not ref_df.empty:
         filtered_ref  = ref_df.copy()
         filtered_bbox = bbox_df.copy()
 
-    # B0 — ward_code must not be null or empty in the uploaded data
-    null_wc_mask = mlos["ward_code"].isna() | mlos["ward_code"].astype(str).str.strip().eq("")
+    # B0 — ward_code must not be null or empty in the uploaded data. Uses the shared D-04
+    # absence predicate (vec_is_absent) rather than a hand-rolled null-or-empty disjunction,
+    # so a sentinel ward_code (e.g. "n/a") fails B0 exactly as it fails Rule 1 and 4.missing
+    # elsewhere (D-03's exactly-three-checks invariant).
+    null_wc_mask = vec_is_absent(mlos["ward_code"])
     add("B0", "Ward Code — Not Available on Data",
         "ward_code is null or empty on the uploaded data",
         null_wc_mask, ["ward_code"])
+
+    # B5 (INTEG-04, D-18): the reference is unavailable entirely. Emitted as an early return,
+    # after B0 so the ward-code-on-data finding still reaches the officer, and before B1/B2/B3
+    # so the emitted set is exactly the two checks D-18 specifies. Mirrors the early-return
+    # precedent at the top of this function for a missing ward_code column.
+    if ref_df.empty:
+        checks.append({
+            "Rule#": "B5", "QC Check": "Boundary Reference Unavailable",
+            "Description": "No boundary reference was found — B1, B2, B3 and B4 could not run",
+            "Failing Rows": 1, "Total Rows": 1,
+            "Fail %": pct(1, 1),
+            "Status": "❌ FAIL",
+        })
+        return checks, pd.DataFrame()
 
     # B1 — non-null ward_codes must exist in the state-name-filtered boundary reference
     if not filtered_ref.empty and "ward_code" in filtered_ref.columns:
@@ -184,6 +218,34 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.D
                 ]["ward_code"].astype(str).tolist()
                 _matched.append(", ".join(_hits[:5]) if _hits else "No matching ward found")
             _b2_detail["Intersecting Ward(s) from Boundary"] = _matched
+
+    # B4 (INTEG-04, D-16/D-17/D-19): guarded on the national reference being non-empty --
+    # with no reference at all there is no scope for B4 to describe (B5 already returned
+    # above in that case), so it emits nothing rather than something false. Hand-built rather
+    # than routed through add(), because this is a run-level condition with a 1-over-1
+    # denominator, not a row-level one (add() hard-codes Total Rows to the MLoS row count).
+    if not ref_df.empty:
+        b4_failing = 1 if fallback_fired else 0
+        if fallback_fired:
+            b4_status = "❌ FAIL"
+            b4_desc = (
+                "ward_code (B1) and coordinate (B2) checks ran against the full national "
+                "boundary reference because state-name filtering matched no ward in the "
+                "file's own state(s)"
+            )
+        else:
+            b4_status = "✅ PASS"
+            b4_desc = (
+                f"validated against {pre_fallback_ward_count} ward(s) in the file's own "
+                "state(s), no fallback to the national reference"
+            )
+        checks.append({
+            "Rule#": "B4", "QC Check": "Boundary Reference Fallback",
+            "Description": b4_desc,
+            "Failing Rows": b4_failing, "Total Rows": 1,
+            "Fail %": pct(b4_failing, 1),
+            "Status": b4_status,
+        })
 
     detail_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
     return checks, detail_df
