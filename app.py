@@ -1003,15 +1003,12 @@ with tab1:
     # ENGINE-04: no second auto-correction call here — that used to mint a fresh eha_guid for
     # the download that the screen never saw (F5). Read the one cached snapshot instead,
     # produced by the sole auto-correction call in the QC cache-miss branch above.
-    corrected_df    = mlos_corrected
-    correction_log  = autocorrect_log
-
-    if not correction_log:
+    if not autocorrect_log:
         st.success("✅ No corrections needed — all checked fields are already valid.")
     else:
-        total_fixes = sum(r["Rows Fixed"] for r in correction_log)
-        st.info(f"🔧 **{len(correction_log)} correction(s) applied** across **{total_fixes:,} row(s)**.")
-        log_df = pd.DataFrame(correction_log)
+        total_fixes = sum(r["Rows Fixed"] for r in autocorrect_log)
+        st.info(f"🔧 **{len(autocorrect_log)} correction(s) applied** across **{total_fixes:,} row(s)**.")
+        log_df = pd.DataFrame(autocorrect_log)
         st.dataframe(log_df, use_container_width=True, hide_index=True)
 
     # ── Columns renamed at load (INTEG-03/D-11) ───────────────────────────────────
@@ -1034,10 +1031,10 @@ with tab1:
     st.markdown("---")
     st.markdown("**📥 Download Full MLoS Data (with Auto Corrections)**")
     st.caption(
-        f"Full dataset — **{len(corrected_df):,} rows × {len(corrected_df.columns)} columns** — "
+        f"Full dataset — **{len(mlos_corrected):,} rows × {len(mlos_corrected.columns)} columns** — "
         "with all auto corrections applied. Ready for re-upload or submission."
     )
-    corrected_bytes = build_corrected_excel(corrected_df)
+    corrected_bytes = build_corrected_excel(mlos_corrected)
     corrected_name  = filename.rsplit(".", 1)[0] + "_autocorrected.xlsx"
     st.download_button(
         label     = "⬇️ Download Full MLoS — Auto Corrected (Excel)",
