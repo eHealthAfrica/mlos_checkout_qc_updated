@@ -132,7 +132,7 @@ Plans:
   4. The findings on screen describe the same version of the submission as the downloadable auto-corrected file, and a generated `eha_guid` is identical on first render and on every rerun
   5. A boundary-reference fallback to the full national set appears to the officer as a warning rather than silently widening B1
 
-**Plans**: 4/6 plans executed
+**Plans**: 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -153,7 +153,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 02-05-PLAN.md — `B4` and `B5`: boundary reference scope and availability made visible (INTEG-04, ENGINE-06)
+- [x] 02-05-PLAN.md — `B4` and `B5`: boundary reference scope and availability made visible (INTEG-04, ENGINE-06)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -273,7 +273,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
-| 2. Detection Correctness and Three-Format Harness | 4/6 | In Progress|  |
+| 2. Detection Correctness and Three-Format Harness | 5/6 | In Progress|  |
 | 3. Verdict and Report Integrity | 0/TBD | Not started | - |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
 | 5. Submission Record | 0/TBD | Not started | - |

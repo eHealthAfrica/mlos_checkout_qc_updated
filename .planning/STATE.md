@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Detection Correctness and Three-Format Harness
 status: executing
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-09-10T17:04:30.501Z"
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-09-10T17:21:00.780Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 02 execution started
-state_head: 00121113fb2fc71355fa826a1f2c743300acd513
+state_head: 00f47611f4c1731c66fe73649e6093daef08112a
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 16
-  completed_plans: 10
+  completed_plans: 11
   percent: 14
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 02 (Detection Correctness and Three-Format Harness) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 02 execution started
 
@@ -68,6 +68,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 02 P02 | 15min | 2 tasks | 5 files |
 | Phase 02 P03 | 25min | 2 tasks | 5 files |
 | Phase 02 P04 | 3h 37m | 3 tasks | 3 files |
+| Phase 02 P05 | 45min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,8 @@ Recent decisions affecting current work:
 - [Phase 02]: [Phase 02] Plan 03: S1/S2's column-set comparison changed from a lower-cased projection to the frame's raw columns, removing qc/schema.py's own second, diverging view of the column set (F7's root cause), proven behaviour-neutral for the shared fixture.
 - [Phase 02]: [Phase 02] Plan 04: qc.columns.normalize_columns is now called at all three officer-supplied load paths (MLoS frame, same-upload Takeoffpoint frame, separately-uploaded Takeoffpoint override), closing F7 -- a non-canonically spelled header no longer satisfies S1 while silently skipping its rules. — Collision groups are tagged with their source table and merged (not overwritten) across all three load sites into two session-state keys, so the on-screen rename panel and the Columns Renamed report sheet always read the same single source of truth -- the exact two-sources-of-truth shape F7 was.
 - [Phase 02]: [Phase 02] Plan 04: Column renames are reported to the officer in exactly two places -- an on-screen expander in Tab 1 and a conditional Columns Renamed sheet in the downloaded report -- with no Pass/Fail and no score weight, verified live per D-11 (Task 3 checkpoint, all four verdicts pass). — build_excel_report's new column_renames keyword parameter defaults to None so existing callers keep working, and an AST-level acceptance check confirms the rename record never enters all_checks or LAYER_WEIGHTS.
+- [Phase 02]: [Phase 02] Plan 05: B4/B5 report the boundary reference's national-fallback widening and unavailability as failing checks instead of silent branches, closing INTEG-04; canonical boundary order extended to B0-B5 (49 identifiers total). — D-16 through D-19 promote reference scope and availability to first-class reported facts; B4's FAIL description deliberately names both B1 and B2 since the fallback reassigns both frames.
+- [Phase 02]: [Phase 02] Plan 05: Fixed test_deterministic_order.py's full-registry equality assertion (Rule 1), broken the instant B5 was registered, since that test's fixture always carries a real reference and can never emit a reference-absence-only check. — B5's real coverage proof lives in test_registry_covers_emitted_ids.py's dedicated reference-absent scenario (Task 2); excluding B5 from the deterministic-order comparison keeps that test's real purpose (cross-process order stability) intact.
 
 ### Pending Todos
 
@@ -126,6 +129,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T17:04:30.455Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-09-10T17:21:00.734Z
+Stopped at: Completed 02-05-PLAN.md
 Resume file: None
