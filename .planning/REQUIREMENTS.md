@@ -18,7 +18,7 @@ that let a failing file be reported as clean.
 - [x] **VERDICT-03**: The emailed summary reports Settlement layer counts alongside the other four layers — closes F11
 - [x] **VERDICT-04**: Issue-row totals on screen, in the report and in the email count distinct settlement rows, not rule-row pairs — closes F8
 - [x] **VERDICT-05**: The weighted score awards no credit for a layer that ran zero checks, and displays that layer as "n/a" rather than 100% — closes F6
-- [ ] **VERDICT-06**: Boundary checks appear in rule order B0, B1, B2, B3 in every summary table and export — closes F14
+- [x] **VERDICT-06**: Boundary checks appear in rule order B0, B1, B2, B3 in every summary table and export — closes F14
 
 ### Detection Correctness (M1)
 
@@ -161,7 +161,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | VERDICT-03 | Phase 3 | Complete |
 | VERDICT-04 | Phase 3 | Complete |
 | VERDICT-05 | Phase 3 | Complete |
-| VERDICT-06 | Phase 3 | Pending |
+| VERDICT-06 | Phase 3 | Complete |
 | INTEG-01 | Phase 2 | Complete |
 | INTEG-02 | Phase 2 | Complete |
 | INTEG-03 | Phase 2 | Complete |

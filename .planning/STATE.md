@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Verdict and Report Integrity
-status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-09-10T19:54:50.346Z"
+status: verifying
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-09-10T20:49:22.673Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 9d4904735a04d86d8b4ffdde0cbdf88896c061a4
+state_head: 908d76f237b712bf4511c69c0ca901b331a040e3
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 16
-  completed_plans: 15
+  completed_plans: 16
   percent: 14
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 
 Phase: 03 (Verdict and Report Integrity) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-10 — Phase 03 execution started
 
 Progress: [█░░░░░░░░░] 14%
@@ -74,6 +74,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 03 P01 | 55min | 3 tasks | 9 files |
 | Phase 03 P02 | 45min | 3 tasks | 5 files |
 | Phase 03 P03 | 15min | 3 tasks | 3 files |
+| Phase 03 P04 | 55min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-02: Report workbook reshaped to one combined QC Summary sheet (registry-sourced Layer column, D-07 placeholder rows) plus one detail sheet per layer, replacing the old two-summary-sheet shape
 - [Phase 03]: 03-03: qc.report.build_email_subject_and_body(summary) is a pure email builder (no secrets, no smtplib); send_qc_email reduced to a one-parameter thin SMTP sender — Closes F11/VERDICT-03 -- today's email body had no Settlement layer line at all
 - [Phase 03]: 03-03: Generate Report tab's three-column MLoS/Settlement/Takeoffpoint breakdown replaced with a five-layer metadata card and one combined table built from qc.report.summary_rows(summary) — Screen and downloaded workbook now read the same row builder so they cannot drift apart
+- [Phase 03]: [Phase 03] 03-04: Standing proof of canonical rule order at all four ordered outputs (summary object, summary_rows, workbook QC Summary sheet, email check list), read from qc.canonical_order() at test time, never a literal identifier list -- closes VERDICT-06/F14
+- [Phase 03]: [Phase 03] 03-04: Standing proof that the verdict sentence/score/headline are character-identical at the workbook cover and email body, and every registry layer appears at every presentation site (assumption-delta companion invariant); found and fixed two real offenders app.py's own local FAIL-counting and a per-layer-name-keyed label dict, both relocated to qc/report.py
+- [Phase 03]: [Phase 03] 03-04: README.md sections 8, 10, 11 rewritten to match D-01 to D-16's shipped scoring/report/email behaviour; no remaining claim that a skipped layer scores as though it passed
 
 ### Pending Todos
 
@@ -146,6 +150,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T19:54:50.295Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-09-10T20:49:22.619Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
