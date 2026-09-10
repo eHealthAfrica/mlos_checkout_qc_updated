@@ -13,8 +13,13 @@ back to the facade would be a cycle. ``app.py`` reaches this module the way it a
 """
 
 from dataclasses import dataclass
+from datetime import datetime
+from io import BytesIO
 
+import openpyxl
 import pandas as pd
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from . import sort_by_registry
 from .results import canonical_order, get_rule
@@ -258,3 +263,180 @@ def build_summary(filename, layer_results, mlos_row_count, takeoff_row_count) ->
             source_row_count=source_row_count,
         )
     return QcSummary(filename=filename, layers=layers)
+
+
+def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd.DataFrame",
+                    column_renames=None) -> bytes:
+    """Build the downloadable QC report workbook, relocated from ``app.py``'s
+    ``build_excel_report`` (Analog D, 03-PATTERNS.md).
+
+    Task 1's scope: the cover reads ``summary.verdict_text``/``summary.score_display`` instead
+    of recomputing a two-layer failing-count sum (F1/VERDICT-01/VERDICT-02) -- the case that
+    filed a Boundary-only failure as CLEAN. The sheet set (still ``MLoS QC Summary`` /
+    ``Takeoffpoint QC Summary`` / two detail sheets / two raw sheets / the conditional renames
+    sheet) and the per-cell styling are unchanged here; task 2 reshapes the sheet set into one
+    combined ``QC Summary`` plus a detail sheet per layer (D-06/D-07), and task 3 removes
+    per-cell styling from the raw and detail sheets (ENGINE-08/D-09).
+    """
+    out = BytesIO()
+    wb = openpyxl.Workbook()
+
+    BLU = "1D4ED8"
+    GRN = "15803D"; LGN = "F0FDF4"
+    RED = "DC2626"; LRD = "FFF1F2"
+    LGY = "F8FAFC"
+    WHT = "FFFFFF"
+
+    hdr_fill  = PatternFill("solid", fgColor=BLU)
+    hdr_font  = Font(bold=True, color=WHT, size=10, name="Calibri")
+    pass_fill = PatternFill("solid", fgColor=LGN)
+    fail_fill = PatternFill("solid", fgColor=LRD)
+    lgry_fill = PatternFill("solid", fgColor=LGY)
+    body_font = Font(size=10, name="Calibri")
+    bold_font = Font(bold=True, size=10, name="Calibri")
+    ctr       = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    lft       = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+    thin      = Side(style="thin", color="D1D5DB")
+    bdr       = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def hdr_row(ws, row, cols):
+        for ci, col in enumerate(cols, 1):
+            c = ws.cell(row=row, column=ci, value=col)
+            c.fill = hdr_fill; c.font = hdr_font; c.alignment = ctr; c.border = bdr
+
+    mlos_l = summary.layers["MLoS"]
+    tp_l = summary.layers["Takeoffpoint"]
+
+    # ── Sheet 1: Cover ──
+    ws = wb.active; ws.title = "QC Report Cover"
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 38
+    ws.column_dimensions["B"].width = 52
+    ws.merge_cells("A1:B1")
+    ws["A1"].value = "MLOS CHECKOUT — QUALITY CONTROL REPORT"
+    ws["A1"].font  = Font(bold=True, size=15, color=WHT, name="Calibri")
+    ws["A1"].fill  = PatternFill("solid", fgColor=BLU)
+    ws["A1"].alignment = ctr
+    ws.row_dimensions[1].height = 38
+
+    # D-08: exactly five metadata rows -- File, Generated At, MLoS Rows, Takeoffpoint Rows,
+    # Weighted Score -- and no per-layer counts. Per-layer counts moved to the QC Summary sheet.
+    meta = [
+        ("File",              summary.filename),
+        ("Generated At",      datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ("MLoS Rows",         len(mlos_raw)),
+        ("Takeoffpoint Rows", len(takeoff_df)),
+        ("Weighted Score",    summary.score_display),
+    ]
+    for ri, (k, v) in enumerate(meta, 3):
+        ka = ws.cell(row=ri, column=1, value=k); ka.font=bold_font; ka.border=bdr
+        vb = ws.cell(row=ri, column=2, value=v); vb.font=body_font; vb.border=bdr; vb.alignment=lft
+        if ri % 2 == 0: ka.fill=lgry_fill; vb.fill=lgry_fill
+
+    # Verdict row index computed from the metadata block's own length, never hard-coded -- a
+    # literal row number here is exactly what would land the verdict inside the metadata table
+    # the moment the block's length changed (ten rows down to five, D-08).
+    last_meta_row = 2 + len(meta)
+    verdict_row = last_meta_row + 2
+    ws.merge_cells(f"A{verdict_row}:B{verdict_row}")
+    vd = ws.cell(row=verdict_row, column=1)
+    vd.value     = summary.verdict_text
+    vd.fill      = PatternFill("solid", fgColor=GRN if summary.n_fail == 0 else RED)
+    vd.font      = Font(bold=True, size=12, color=WHT, name="Calibri")
+    vd.alignment = ctr
+    ws.row_dimensions[verdict_row].height = 30
+
+    # helper to write a QC summary sheet
+    def write_summary(ws_s, title, checks_list):
+        ws_s.sheet_view.showGridLines = False
+        ws_s.merge_cells("A1:G1")
+        ws_s["A1"].value     = title
+        ws_s["A1"].font      = Font(bold=True, size=13, color=WHT, name="Calibri")
+        ws_s["A1"].fill      = PatternFill("solid", fgColor=BLU)
+        ws_s["A1"].alignment = ctr
+        ws_s.row_dimensions[1].height = 30
+        cols = ["Status","Rule#","QC Check","Description","Failing Rows","Total Rows","Fail %"]
+        hdr_row(ws_s, 2, cols)
+        for ri, row in enumerate(checks_list, 3):
+            is_fail = "FAIL" in row["Status"]
+            for ci, key in enumerate(cols, 1):
+                c = ws_s.cell(row=ri, column=ci, value=row[key])
+                c.font=body_font; c.border=bdr
+                c.alignment = ctr if ci in (1,2,5,6,7) else lft
+                c.fill = fail_fill if is_fail else pass_fill
+        for i, w in enumerate([14,8,32,65,14,12,9], 1):
+            ws_s.column_dimensions[get_column_letter(i)].width = w
+
+    # helper to write issue detail sheet
+    def write_detail(ws_d, title, detail_df):
+        ws_d.sheet_view.showGridLines = False
+        if detail_df.empty:
+            ws_d["A1"].value     = f"✅ No issues — {title} passed all checks"
+            ws_d["A1"].font      = Font(bold=True, size=12, color=WHT, name="Calibri")
+            ws_d["A1"].fill      = PatternFill("solid", fgColor=GRN)
+            ws_d["A1"].alignment = ctr
+            return
+        nc = len(detail_df.columns)
+        ws_d.merge_cells(f"A1:{get_column_letter(nc)}1")
+        ws_d["A1"].value     = title
+        ws_d["A1"].font      = Font(bold=True, size=12, color=WHT, name="Calibri")
+        ws_d["A1"].fill      = PatternFill("solid", fgColor=RED)
+        ws_d["A1"].alignment = ctr
+        ws_d.row_dimensions[1].height = 26
+        hdr_row(ws_d, 2, list(detail_df.columns))
+        for ri, (_, row) in enumerate(detail_df.iterrows(), 3):
+            for ci, v in enumerate(row.values, 1):
+                c = ws_d.cell(row=ri, column=ci, value=v)
+                c.font=body_font; c.border=bdr; c.alignment=lft
+                if ri % 2 == 0: c.fill = PatternFill("solid", fgColor="FFF5F5")
+        for ci in range(1, nc+1):
+            mx = max(len(str(detail_df.columns[ci-1])),
+                     max((len(str(v)) for v in detail_df.iloc[:, ci-1].astype(str)), default=0))
+            ws_d.column_dimensions[get_column_letter(ci)].width = min(max(mx+3, 12), 42)
+
+    # helper to write raw data sheet
+    def write_raw(ws_r, df):
+        ws_r.sheet_view.showGridLines = False
+        if df.empty: return
+        hdr_row(ws_r, 1, list(df.columns))
+        for ri, (_, row) in enumerate(df.iterrows(), 2):
+            for ci, v in enumerate(row.values, 1):
+                c = ws_r.cell(row=ri, column=ci, value=v)
+                c.font=body_font; c.border=bdr; c.alignment=lft
+                if ri % 2 == 0: c.fill = lgry_fill
+        for ci in range(1, len(df.columns)+1):
+            ws_r.column_dimensions[get_column_letter(ci)].width = 18
+
+    write_summary(wb.create_sheet("MLoS QC Summary"),       "MLoS Table — QC Check Summary",          mlos_l.checks)
+    write_detail (wb.create_sheet("MLoS Issue Detail"),      "MLoS Table — Detailed Issue Rows",        mlos_l.detail)
+    write_summary(wb.create_sheet("Takeoffpoint QC Summary"),"Takeoffpoint Table — QC Check Summary",   tp_l.checks)
+    write_detail (wb.create_sheet("Takeoffpoint Issue Detail"),"Takeoffpoint Table — Detailed Issues",  tp_l.detail)
+    write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_raw)
+    write_raw    (wb.create_sheet("Raw Takeoffpoint Data"),  takeoff_df)
+
+    # ── Columns Renamed (Phase 2 INTEG-03/D-11) ───────────────────────────────────────────
+    # Reported in exactly two places: this sheet and the on-screen expander (Tab 1). No
+    # Pass/Fail, no rule identifier, no score weight -- a rename is not a defect. A clean
+    # submission (nothing renamed) gets no sheet at all, not an empty one.
+    if column_renames:
+        ws_r = wb.create_sheet("Columns Renamed")
+        ws_r.sheet_view.showGridLines = False
+        ws_r.merge_cells("A1:B1")
+        ws_r["A1"].value     = "Columns Renamed at Load"
+        ws_r["A1"].font      = Font(bold=True, size=12, color=WHT, name="Calibri")
+        ws_r["A1"].fill      = PatternFill("solid", fgColor=BLU)
+        ws_r["A1"].alignment = ctr
+        ws_r.row_dimensions[1].height = 26
+        hdr_row(ws_r, 2, ["Original Header", "Resolved To"])
+        for ri, (orig, resolved) in enumerate(sorted(column_renames.items()), 3):
+            c1 = ws_r.cell(row=ri, column=1, value=orig)
+            c2 = ws_r.cell(row=ri, column=2, value=resolved)
+            for c in (c1, c2):
+                c.font = body_font; c.border = bdr; c.alignment = lft
+                if ri % 2 == 0:
+                    c.fill = lgry_fill
+        ws_r.column_dimensions["A"].width = 32
+        ws_r.column_dimensions["B"].width = 32
+
+    wb.save(out)
+    return out.getvalue()

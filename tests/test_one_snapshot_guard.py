@@ -6,15 +6,17 @@ appears, the bare frame name returns at module scope, or a run_all() facade is i
 
 Reading of D-15's "mlos_raw appears at exactly one call site" (the report's as-submitted
 sheet): read literally against the code, mlos_raw is an argument to two calls --
-auto_correct_mlos, which is the sole producer of mlos_corrected, and build_excel_report, which
-writes the as-submitted sheet. The producer is not a *consumer* of the raw frame for display or
-for checking, which is the class D-15's sentence is actually about. This guard therefore asserts
-the set of called-function names receiving mlos_raw as an argument is exactly
-{"auto_correct_mlos", "build_excel_report"} -- precise, checkable, and it asserts exactly what
-D-15 protects: that no QC layer, no on-screen table and no download reads the uncorrected frame.
-Do not "fix" this guard toward the literal sentence by removing auto_correct_mlos from the
-expected set -- that narrows the guard and breaks it (see 02-06-PLAN.md's planner
-clarification).
+auto_correct_mlos, which is the sole producer of mlos_corrected, and build_workbook (03-02:
+relocated from app.py's own build_excel_report into qc.report, called as
+qc.report.build_workbook(...) -- this guard's _call_name helper resolves an attribute call to
+its final attr name, "build_workbook"), which writes the as-submitted sheet. The producer is
+not a *consumer* of the raw frame for display or for checking, which is the class D-15's
+sentence is actually about. This guard therefore asserts the set of called-function names
+receiving mlos_raw as an argument is exactly {"auto_correct_mlos", "build_workbook"} --
+precise, checkable, and it asserts exactly what D-15 protects: that no QC layer, no on-screen
+table and no download reads the uncorrected frame. Do not "fix" this guard toward the literal
+sentence by removing auto_correct_mlos from the expected set -- that narrows the guard and
+breaks it (see 02-06-PLAN.md's planner clarification).
 """
 
 import ast
@@ -148,13 +150,13 @@ def test_both_longitudinal_helpers_receive_the_corrected_frame():
 
 def test_raw_frame_reaches_only_the_producer_and_the_report_builder():
     """The set of called-function names that receive mlos_raw as an argument is exactly the
-    producer (auto_correct_mlos) and the report builder (build_excel_report), and nothing
-    else -- see this module's docstring for why the producer belongs in that set."""
+    producer (auto_correct_mlos) and the report builder (build_workbook, relocated 03-02), and
+    nothing else -- see this module's docstring for why the producer belongs in that set."""
     tree = _parse_app()
     consumers = {name for name, args in _module_scope_calls(tree) if "mlos_raw" in args}
-    assert consumers == {"auto_correct_mlos", "build_excel_report"}, (
+    assert consumers == {"auto_correct_mlos", "build_workbook"}, (
         f"mlos_raw reaches {sorted(consumers)}, expected exactly "
-        f"{{'auto_correct_mlos', 'build_excel_report'}}"
+        f"{{'auto_correct_mlos', 'build_workbook'}}"
     )
 
 
