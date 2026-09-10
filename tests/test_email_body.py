@@ -181,3 +181,117 @@ def test_body_contains_filename_and_generated_at_timestamp():
     _, body = report.build_email_subject_and_body(summary)
     assert summary.filename in body
     assert "Generated:" in body
+
+
+# ─── Task 2: five layer blocks and a grouped check-by-check list ──────────────────
+#
+# The header block (Task 1) already contains the literal substring "MLoS" in its title line
+# ("MLoS QC Report — {filename}"), so a bare ``body.index("MLoS")`` would find the title, not
+# the layer block. Every position-sensitive assertion below anchors its search to start at or
+# after ``_LAYER_SECTION_MARKER`` -- the literal heading text the Layer Summary section opens
+# with -- so it can only ever match inside the layer-blocks region.
+
+_LAYER_SECTION_MARKER = "Layer Summary"
+
+
+def _layer_section_start(body):
+    idx = body.index(_LAYER_SECTION_MARKER)
+    return idx
+
+
+def test_layer_headings_equal_the_registry_layer_order():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    section_start = _layer_section_start(body)
+    headings = {name for name in report.LAYER_ORDER if name in body[section_start:]}
+    assert headings == set(report.LAYER_ORDER)
+
+
+def test_settlement_appears_with_checks_run_and_failing_counts():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    section_start = _layer_section_start(body)
+    section = body[section_start:]
+    assert "Settlement" in section
+    sq = summary.layers["Settlement"]
+    assert str(sq.n_fail) in section
+
+
+def test_layer_headings_appear_in_canonical_order():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    section_start = _layer_section_start(body)
+    positions = [body.index(name, section_start) for name in report.LAYER_ORDER]
+    assert positions == sorted(positions)
+
+
+def test_mlos_block_contains_its_issue_line_verbatim():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    section_start = _layer_section_start(body)
+    assert summary.layers["MLoS"].issue_line in body[section_start:]
+
+
+def test_schema_block_has_no_issue_rows_substring():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    section_start = _layer_section_start(body)
+    schema_start = body.index("Schema", section_start)
+    mlos_start = body.index("MLoS", section_start)
+    schema_block = body[schema_start:mlos_start]
+    assert "Issue Rows" not in schema_block
+
+
+def test_unrun_takeoffpoint_block_reads_exactly_the_not_run_sentence():
+    summary = _summary_takeoffpoint_unrun()
+    _, body = report.build_email_subject_and_body(summary)
+    section_start = _layer_section_start(body)
+    assert "not run: no Takeoffpoint data supplied" in body[section_start:]
+    tp_start = body.index("Takeoffpoint", section_start)
+    later_headings = [
+        body.index(name, tp_start + 1)
+        for name in report.LAYER_ORDER
+        if name != "Takeoffpoint" and body.index(name, section_start) > tp_start
+    ]
+    tp_end = min(later_headings) if later_headings else len(body)
+    tp_block = body[tp_start:tp_end]
+    assert "Checks Run" not in tp_block
+
+
+def test_schema_missing_columns_block_names_each_missing_column():
+    summary = _summary_schema_missing_columns()
+    _, body = report.build_email_subject_and_body(summary)
+    assert "set_target" in body
+    assert "editor" in body
+
+
+def test_no_missing_columns_block_when_schema_detail_is_empty():
+    summary = _summary_schema_no_missing_columns()
+    _, body = report.build_email_subject_and_body(summary)
+    assert "Missing Column" not in body
+
+
+def test_check_by_check_list_contains_one_line_per_check_in_canonical_order():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    expected_ids = [c["Rule#"] for c in summary.all_checks]
+    positions = []
+    for rid in expected_ids:
+        idx = body.find(f"Rule {rid}:")
+        assert idx != -1, f"Rule# {rid!r} not found in check-by-check list"
+        positions.append(idx)
+    assert positions == sorted(positions)
+    assert len(positions) == len(summary.all_checks)
+
+
+def test_clean_summary_still_lists_every_check_that_ran():
+    summary = _summary_schema_no_missing_columns()
+    _, body = report.build_email_subject_and_body(summary)
+    for c in summary.all_checks:
+        assert f"Rule {c['Rule#']}:" in body
+
+
+def test_no_settlement_name_from_any_detail_frame_leaks_into_the_body():
+    summary = _summary_five_layers_settlement_failing()
+    _, body = report.build_email_subject_and_body(summary)
+    assert _SECRET_SETTLEMENT not in body
