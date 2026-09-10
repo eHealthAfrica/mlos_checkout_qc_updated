@@ -582,7 +582,7 @@ else:
             mlos_corrected, takeoff_df, collisions=st.session_state.get("column_collisions", ())
         )
         schema_checks = qc.sort_by_registry(schema_checks)
-        schema_fail = sum(1 for c in schema_checks if "FAIL" in c["Status"])
+        schema_fail = qc.report.count_failing(schema_checks)
         st.write(f"   {'❌' if schema_fail else '✅'} Schema: "
                  f"{len(schema_checks) - schema_fail}/{len(schema_checks)} checks passed")
         qc_bar.progress(20, text="✅ Step 1 / 5 — Schema Alignment complete")
@@ -592,7 +592,7 @@ else:
         st.write("🏘️ Step 2 / 5 — MLoS Rules")
         mlos_checks, mlos_detail = qc.mlos.run_mlos_qc(mlos_corrected, takeoff_df)
         mlos_checks = qc.sort_by_registry(mlos_checks)
-        mlos_qc_fail = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
+        mlos_qc_fail = qc.report.count_failing(mlos_checks)
         st.write(f"   {'❌' if mlos_qc_fail else '✅'} MLoS: "
                  f"{len(mlos_checks) - mlos_qc_fail}/{len(mlos_checks)} checks passed")
         qc_bar.progress(40, text="✅ Step 2 / 5 — MLoS Rules complete")
@@ -602,7 +602,7 @@ else:
         st.write("📐 Step 3 / 5 — Settlement QC")
         settlement_checks, settlement_detail = qc.settlement.run_settlement_qc(mlos_corrected)
         settlement_checks = qc.sort_by_registry(settlement_checks)
-        sq_fail = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
+        sq_fail = qc.report.count_failing(settlement_checks)
         st.write(f"   {'❌' if sq_fail else '✅'} Settlement: "
                  f"{len(settlement_checks) - sq_fail}/{len(settlement_checks)} checks passed")
         qc_bar.progress(60, text="✅ Step 3 / 5 — Settlement QC complete")
@@ -616,7 +616,7 @@ else:
         else:
             tp_checks, tp_detail = qc.takeoff.run_takeoff_qc(takeoff_df, mlos_corrected)
             tp_checks = qc.sort_by_registry(tp_checks)
-            tp_qc_fail = sum(1 for c in tp_checks if "FAIL" in c["Status"])
+            tp_qc_fail = qc.report.count_failing(tp_checks)
             st.write(f"   {'❌' if tp_qc_fail else '✅'} Takeoffpoint: "
                      f"{len(tp_checks) - tp_qc_fail}/{len(tp_checks)} checks passed")
         qc_bar.progress(80, text="✅ Step 4 / 5 — Takeoffpoint Rules complete")
@@ -626,7 +626,7 @@ else:
         st.write("🗺️ Step 5 / 5 — Boundary Checks")
         boundary_checks, boundary_detail = qc.boundary.run_ward_boundary_qc(mlos_corrected, boundary_ref, boundary_bbox)
         boundary_checks = qc.sort_by_registry(boundary_checks)
-        b_fail = sum(1 for c in boundary_checks if "FAIL" in c["Status"])
+        b_fail = qc.report.count_failing(boundary_checks)
         st.write(f"   {'❌' if b_fail else '✅'} Boundary: "
                  f"{len(boundary_checks) - b_fail}/{len(boundary_checks)} checks passed")
         qc_bar.progress(100, text="✅ All QC checks complete!")
@@ -728,16 +728,9 @@ with tab2:
     # D-02: Layer Pass Rate reads n/a (never a number) for a layer that did not run; Weighted
     # Contribution is always a number, 0.0% for that same layer; the Weight column is unchanged.
     # The Total row's contribution carries the achievable-maximum score_display (D-01).
-    _LAYER_LABELS = {
-        "Schema": "🔎 Schema Alignment",
-        "MLoS": "🏘️ MLoS Rules",
-        "Settlement": "📐 Settlement QC",
-        "Takeoffpoint": "📍 Takeoffpoint Rules",
-        "Boundary": "🗺️ Boundary Checks",
-    }
     score_rows = [
         {
-            "QC Layer": _LAYER_LABELS[_name],
+            "QC Layer": qc.report.LAYER_LABELS[_name],
             "Weight": f"{summary.layers[_name].weight * 100:.0f}%",
             "Layer Pass Rate": ("n/a" if summary.layers[_name].pass_rate is None
                                  else f"{summary.layers[_name].pass_rate * 100:.1f}%"),

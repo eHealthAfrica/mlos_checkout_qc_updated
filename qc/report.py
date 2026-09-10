@@ -47,6 +47,30 @@ NOT_RUN_REASON = {
     "Boundary": "no Boundary data supplied",
 }
 
+# Relocated from app.py's Tab 2 score-breakdown table (03-04 Task 2): a per-layer display icon
+# and label. Kept alongside LAYER_ORDER/LAYER_WEIGHTS/NOT_RUN_REASON rather than as a local
+# app.py dict literal, so app.py's score table is built by iterating LAYER_ORDER and looking a
+# label up here, never by naming a layer's dict key one at a time at the construction site
+# (the same "every layer the registry knows appears at every presentation site" invariant
+# tests/test_verdict_agreement.py proves).
+LAYER_LABELS = {
+    "Schema": "🔎 Schema Alignment",
+    "MLoS": "🏘️ MLoS Rules",
+    "Settlement": "📐 Settlement QC",
+    "Takeoffpoint": "📍 Takeoffpoint Rules",
+    "Boundary": "🗺️ Boundary Checks",
+}
+
+
+def count_failing(checks: list) -> int:
+    """Return the number of failing checks in ``checks`` -- the same "FAIL" in Status
+    membership test :attr:`LayerSummary.n_fail` uses, exposed as a free function for the one
+    site that needs a fail count before a full ``LayerSummary`` exists: app.py's per-layer
+    progress narration, printed as each of the five QC steps completes, one at a time, before
+    the shared ``QcSummary`` is built (03-04 Task 2 -- app.py must never re-derive this count
+    with its own inline ``sum(1 for c in checks if "FAIL" in c["Status"])``)."""
+    return sum(1 for c in checks if "FAIL" in c["Status"])
+
 # D-06: the unconditional sheet order. "Columns Renamed" stays out of this tuple and is
 # appended by build_workbook only when a rename is supplied (Phase 2 D-11) -- a clean
 # submission gets no sheet at all, not an empty one.
@@ -86,7 +110,7 @@ class LayerSummary:
 
     @property
     def n_fail(self) -> int:
-        return sum(1 for c in self.checks if "FAIL" in c["Status"])
+        return count_failing(self.checks)
 
     @property
     def n_pass(self) -> int:
@@ -160,7 +184,7 @@ class QcSummary:
 
     @property
     def n_fail(self) -> int:
-        return sum(1 for c in self.all_checks if "FAIL" in c["Status"])
+        return count_failing(self.all_checks)
 
     @property
     def n_pass(self) -> int:
