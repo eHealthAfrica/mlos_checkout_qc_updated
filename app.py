@@ -1081,8 +1081,11 @@ with tab8:
             unsafe_allow_html=True)
 
     # Metadata card — every count read from the shared summary, never re-derived (F1's shape).
+    # Loops over qc.report.LAYER_ORDER (Claude's Discretion, 03-CONTEXT.md) instead of naming
+    # MLoS/Settlement/Takeoffpoint one at a time — the shape that left Schema and Boundary off
+    # this card entirely — so all five layers appear with the D-13 issue lines and a layer that
+    # did not run names the gap rather than showing zeros that read as a pass.
     gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _mlos_l, _sq_l, _tp_l = summary.layers["MLoS"], summary.layers["Settlement"], summary.layers["Takeoffpoint"]
 
     def rrow(lbl, val, cls="val"):
         return (f'<div class="report-row">'
@@ -1090,58 +1093,51 @@ with tab8:
                 f'<span class="{cls}">{val}</span>'
                 f'</div>')
 
-    html = "".join([
+    rows = [
         rrow("📁 File",                    filename),
         rrow("🕐 Generated At",            gen_time),
         rrow("━" * 36,                     "", "val-div"),
         rrow("MLoS Rows",                  f"{len(mlos_corrected):,}"),
         rrow("Takeoffpoint Rows",          f"{len(takeoff_df):,}"),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("MLoS Checks Run",            str(len(_mlos_l.checks))),
-        rrow("MLoS Checks ✅ Passing",     str(_mlos_l.n_pass),  "val-pass"),
-        rrow("MLoS Checks ❌ Failing",     str(_mlos_l.n_fail),  "val-fail" if _mlos_l.n_fail else "val-pass"),
-        rrow("MLoS Issue Rows",            f"{_mlos_l.findings:,}",
-                                            "val-fail" if _mlos_l.findings else "val-pass"),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("Settlement Checks Run",      str(len(_sq_l.checks))),
-        rrow("Settlement Checks ✅ Passing", str(_sq_l.n_pass),  "val-pass"),
-        rrow("Settlement Checks ❌ Failing", str(_sq_l.n_fail),  "val-fail" if _sq_l.n_fail else "val-pass"),
-        rrow("Settlement Issue Rows",      f"{_sq_l.findings:,}",
-                                            "val-fail" if _sq_l.findings else "val-pass"),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("Takeoffpoint Checks Run",    str(len(_tp_l.checks))),
-        rrow("Takeoffpoint Checks ✅ Passing", str(_tp_l.n_pass),  "val-pass"),
-        rrow("Takeoffpoint Checks ❌ Failing", str(_tp_l.n_fail),  "val-fail" if _tp_l.n_fail else "val-pass"),
-        rrow("Takeoffpoint Issue Rows",    f"{_tp_l.findings:,}",
-                                            "val-fail" if _tp_l.findings else "val-pass"),
-    ])
+    ]
+    for name in qc.report.LAYER_ORDER:
+        layer = summary.layers[name]
+        rows.append(rrow("━" * 36, "", "val-div"))
+        if not layer.ran:
+            # D-05/D-14: a layer that did not run gets a single row naming the gap, never zeros
+            # that would read as a clean pass.
+            rows.append(rrow(f"{name}", layer.issue_line, "val-fail"))
+            continue
+        rows.append(rrow(f"{name} Checks Run",       str(len(layer.checks))))
+        rows.append(rrow(f"{name} Checks ✅ Passing", str(layer.n_pass), "val-pass"))
+        rows.append(rrow(f"{name} Checks ❌ Failing", str(layer.n_fail),
+                          "val-fail" if layer.n_fail else "val-pass"))
+        # D-13: Schema is exempt from the Issue Rows line — its rows are missing columns, not
+        # source rows, so it has no distinct-row line (same precedent the per-layer tabs follow).
+        if name != "Schema":
+            rows.append(rrow(f"{name} Issue Rows", layer.issue_line,
+                              "val-fail" if layer.distinct_issue_rows else "val-pass"))
+
+    html = "".join(rows)
     st.markdown(f'<div class="report-card">{html}</div>', unsafe_allow_html=True)
 
-    # Three-column check breakdown
-    col_a, col_b, col_c = st.columns(3)
+    # Combined check breakdown — one table built from qc.report's own row builder, the same
+    # rows in the same order the downloaded workbook's QC Summary sheet uses, so the screen and
+    # the export cannot drift apart (Claude's Discretion, 03-CONTEXT.md). Replaces the old
+    # three-column MLoS/Settlement/Takeoffpoint-only layout — the last screen site that named
+    # layers individually.
+    tbl_cols = ["Layer", "Status", "Rule#", "QC Check", "Failing Rows", "Fail %"]
+    _status_idx = tbl_cols.index("Status")
+
     def hl(row):
-        return (["color:#be123c; font-weight:700"] + [""]*4 if "FAIL" in str(row.get("Status",""))
-                else ["color:#15803d; font-weight:700"] + [""]*4)
-    with col_a:
-        st.markdown("**🏘️ MLoS Check Breakdown**")
-        tbl_m = pd.DataFrame([{"Status": c["Status"], "Rule#": c["Rule#"],
-                                "QC Check": c["QC Check"], "Failing": c["Failing Rows"],
-                                "Fail %": c["Fail %"]} for c in mlos_checks])
-        st.dataframe(tbl_m.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
+        styles = [""] * len(tbl_cols)
+        styles[_status_idx] = ("color:#be123c; font-weight:700" if "FAIL" in str(row.get("Status", ""))
+                                else "color:#15803d; font-weight:700")
+        return styles
 
-    with col_b:
-        st.markdown("**📐 Settlement Check Breakdown**")
-        tbl_sq = pd.DataFrame([{"Status": c["Status"], "Rule#": c["Rule#"],
-                                 "QC Check": c["QC Check"], "Failing": c["Failing Rows"],
-                                 "Fail %": c["Fail %"]} for c in settlement_checks])
-        st.dataframe(tbl_sq.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
-
-    with col_c:
-        st.markdown("**📍 Takeoffpoint Check Breakdown**")
-        tbl_t = pd.DataFrame([{"Status": c["Status"], "Rule#": c["Rule#"],
-                                "QC Check": c["QC Check"], "Failing": c["Failing Rows"],
-                                "Fail %": c["Fail %"]} for c in tp_checks])
-        st.dataframe(tbl_t.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
+    st.markdown("**📊 Combined Check Breakdown**")
+    tbl = pd.DataFrame(qc.report.summary_rows(summary))[tbl_cols]
+    st.dataframe(tbl.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
