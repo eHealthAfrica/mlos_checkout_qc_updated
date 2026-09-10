@@ -511,8 +511,11 @@ with st.sidebar:
 |------|-------|
 | 1 | All schema NOT NULL fields must not be null (`state_code`, `state_name`, `lga_code`, `lga_name`, `ward_name`, `ward_code`, `settlement_name`, `latitude`, `longitude`, `security_compromised`, `accessibility_status`, `set_population`, `set_target`, `number_of_household`, `urban`, `rural`, `scattered`, `highrisk`, `slums`, `densely_populated`, `hard2reach`, `border`, `nomadic`, `riverine`, `fulani`, `timestamp`, `eha_guid`, `settlementarea_globalid`) |
 | 2 | takeoffpoint == takeoffpoint.name |
+| 2.missing | takeoffpoint must not be blank |
 | 3 | takeoffpoint_code == takeoffpoint.code |
+| 3.missing | takeoffpoint_code must not be blank |
 | 4 | ward_code == takeoffpoint.wardcode |
+| 4.missing | ward_code must not be blank |
 | 5 | security_compromised = Y/N |
 | 6 | accessibility_status valid |
 | 7 | Partial/Inaccessible requires reason |
@@ -550,8 +553,11 @@ with st.sidebar:
 | Rule | Check |
 |------|-------|
 | TP2 | name == mlos.takeoffpoint |
+| TP2.missing | name must not be blank |
 | TP3 | code == mlos.takeoffpoint_code |
+| TP3.missing | code must not be blank |
 | TP4 | wardcode == mlos.ward_code |
+| TP4.missing | wardcode must not be blank |
 | TP5 | globalid = valid UUID |
         """)
     with st.expander("🗺️ Boundary Check Rules", expanded=False):

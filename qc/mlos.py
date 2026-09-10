@@ -22,8 +22,11 @@ from .results import register
 
 register("1", "MLoS", "Required Fields — Not Null", "All schema NOT NULL fields must not be empty")
 register("2", "MLoS", "Takeoffpoint Name Match", "takeoffpoint in MLoS must match name in Takeoffpoint table")
+register("2.missing", "MLoS", "Takeoffpoint Name Missing", "takeoffpoint in MLoS must not be blank")
 register("3", "MLoS", "Takeoffpoint Code Match", "takeoffpoint_code in MLoS must match code in Takeoffpoint table")
+register("3.missing", "MLoS", "Takeoffpoint Code Missing", "takeoffpoint_code in MLoS must not be blank")
 register("4", "MLoS", "Ward Code Match", "ward_code in MLoS must match wardcode in Takeoffpoint table")
+register("4.missing", "MLoS", "Ward Code Missing", "ward_code in MLoS must not be blank")
 register("5", "MLoS", "Security Compromised Y/N", "security_compromised must be Y or N")
 register("6", "MLoS", "Accessibility Status Valid",
          "accessibility_status must be: Fully Accessible, Partially Accessible, or Inaccessible")
@@ -117,26 +120,58 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
             )
             details.append(_sub1)
 
-    # R2 — Takeoffpoint Name Match
-    if "takeoffpoint" in mlos.columns and "name" in takeoff.columns:
-        valid = set(takeoff["name"].dropna().str.strip())
-        add("2", "Takeoffpoint Name Match",
-            "takeoffpoint in MLoS must match name in Takeoffpoint table",
-            ~mlos["takeoffpoint"].astype(str).str.strip().isin(valid), ["takeoffpoint"])
+    # R2 / 2.missing — Takeoffpoint Name Match
+    # D-01/D-03/D-07 (INTEG-02): a blank `takeoffpoint` cell must not silently match a blank
+    # `name` cell in the Takeoffpoint table (F9). The valid-target set is built from
+    # non-absent Takeoffpoint names only (vec_is_absent, not .dropna(), because a CSV/XLSX
+    # blank arrives as "" under keep_default_na=False and .dropna() cannot remove it), AND the
+    # match mask itself excludes rows whose MLoS-side source cell is absent — both halves are
+    # required, or a blank source would fail both "2" and "2.missing" (four checks instead of
+    # D-03's three). "2.missing" fires unconditionally whenever the MLoS-side column exists,
+    # even with no Takeoffpoint table supplied at all (D-07).
+    if "takeoffpoint" in mlos.columns:
+        _absent2 = vec_is_absent(mlos["takeoffpoint"])
+        if "name" in takeoff.columns:
+            _valid2 = set(
+                takeoff.loc[~vec_is_absent(takeoff["name"]), "name"].astype(str).str.strip()
+            )
+            _not_matched2 = ~mlos["takeoffpoint"].astype(str).str.strip().isin(_valid2)
+            add("2", "Takeoffpoint Name Match",
+                "takeoffpoint in MLoS must match name in Takeoffpoint table",
+                ~_absent2 & _not_matched2, ["takeoffpoint"])
+        add("2.missing", "Takeoffpoint Name Missing",
+            "takeoffpoint in MLoS must not be blank",
+            _absent2, ["takeoffpoint"])
 
-    # R3 — Takeoffpoint Code Match
-    if "takeoffpoint_code" in mlos.columns and "code" in takeoff.columns:
-        valid = set(takeoff["code"].dropna().str.strip())
-        add("3", "Takeoffpoint Code Match",
-            "takeoffpoint_code in MLoS must match code in Takeoffpoint table",
-            ~mlos["takeoffpoint_code"].astype(str).str.strip().isin(valid), ["takeoffpoint_code"])
+    # R3 / 3.missing — Takeoffpoint Code Match (mirrors R2/2.missing; see comment above)
+    if "takeoffpoint_code" in mlos.columns:
+        _absent3 = vec_is_absent(mlos["takeoffpoint_code"])
+        if "code" in takeoff.columns:
+            _valid3 = set(
+                takeoff.loc[~vec_is_absent(takeoff["code"]), "code"].astype(str).str.strip()
+            )
+            _not_matched3 = ~mlos["takeoffpoint_code"].astype(str).str.strip().isin(_valid3)
+            add("3", "Takeoffpoint Code Match",
+                "takeoffpoint_code in MLoS must match code in Takeoffpoint table",
+                ~_absent3 & _not_matched3, ["takeoffpoint_code"])
+        add("3.missing", "Takeoffpoint Code Missing",
+            "takeoffpoint_code in MLoS must not be blank",
+            _absent3, ["takeoffpoint_code"])
 
-    # R4 — Ward Code Match
-    if "ward_code" in mlos.columns and "wardcode" in takeoff.columns:
-        valid = set(takeoff["wardcode"].dropna().str.strip())
-        add("4", "Ward Code Match",
-            "ward_code in MLoS must match wardcode in Takeoffpoint table",
-            ~mlos["ward_code"].astype(str).str.strip().isin(valid), ["ward_code"])
+    # R4 / 4.missing — Ward Code Match (mirrors R2/2.missing; see comment above)
+    if "ward_code" in mlos.columns:
+        _absent4 = vec_is_absent(mlos["ward_code"])
+        if "wardcode" in takeoff.columns:
+            _valid4 = set(
+                takeoff.loc[~vec_is_absent(takeoff["wardcode"]), "wardcode"].astype(str).str.strip()
+            )
+            _not_matched4 = ~mlos["ward_code"].astype(str).str.strip().isin(_valid4)
+            add("4", "Ward Code Match",
+                "ward_code in MLoS must match wardcode in Takeoffpoint table",
+                ~_absent4 & _not_matched4, ["ward_code"])
+        add("4.missing", "Ward Code Missing",
+            "ward_code in MLoS must not be blank",
+            _absent4, ["ward_code"])
 
     # R5 — Security Compromised Y/N
     if "security_compromised" in mlos.columns:
