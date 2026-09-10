@@ -135,11 +135,28 @@ Plans:
 **Plans**: 6 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 02-01-PLAN.md — Tracer: absence predicate, pure loaders extracted to `qc/loaders.py`, and the three-format golden harness (INTEG-01, ENGINE-06)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-02-PLAN.md — Blank-side cross-table findings: the six `.missing` checks and the mask-exclusion fix (INTEG-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 02-03-PLAN.md — Typographic normalisation helper and the `S3` collision check (INTEG-03)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 02-04-PLAN.md — Normalise once at load on all three officer-supplied paths, and report renames to the officer (INTEG-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 02-05-PLAN.md — `B4` and `B5`: boundary reference scope and availability made visible (INTEG-04, ENGINE-06)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 02-06-PLAN.md — One corrected snapshot per submission, identified by content, with the AST guard (ENGINE-03, ENGINE-04)
 
 **Notes**: `"NA"` is a valid domain value in the flag columns *and* Nasarawa's state code, which is why every loader passes `keep_default_na=False`. That decision is correct — INTEG-01 (F2) and INTEG-02 (F9) are unhandled consequences of it, not reasons to reverse it. Research flag: run the golden fixture explicitly against pandas 3.0.5; the Copy-on-Write and string-dtype migrations are subtle.
