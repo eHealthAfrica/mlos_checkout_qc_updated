@@ -4,6 +4,7 @@ import pandas as pd
 import tempfile
 import os
 import re
+import hashlib
 from io import BytesIO
 from datetime import datetime
 import openpyxl
@@ -100,8 +101,26 @@ st.markdown("""
 # qc/loaders.py verbatim (Phase 1 D-08) — imported above. get_uploaded_data below is now only
 # the session-state caching wrapper; all parsing is qc.loaders.load_submission's job.
 
-def get_uploaded_data(uploaded_file, progress=None):
-    cache_key = (uploaded_file.name, getattr(uploaded_file, "size", None))
+def _file_sha256(file_obj) -> str:
+    """Return the hex sha256 digest of an uploaded file's full byte payload (D-13). This is the
+    only place in the file that calls getvalue() — it is called once per uploaded file per
+    rerun and the digest is reused, because getvalue() materialises a full copy of the payload
+    and repeating that per key site would triple the transient memory cost for no benefit."""
+    return hashlib.sha256(file_obj.getvalue()).hexdigest()
+
+
+def _submission_identity(mlos_file, tp_file):
+    """Return a submission's content identity: a tuple of the MLoS file's sha256 digest and
+    either the Takeoffpoint file's sha256 digest or None when no separate Takeoffpoint file was
+    supplied (D-13). This replaces the filename-and-size tuple at all three key sites — the
+    get_uploaded_data cache key, the Run QC button's submitted_key, and the main body's
+    current-key comparison / qc_cache_key — so two different submissions sharing a filename and
+    byte size can no longer collide in session state."""
+    return (_file_sha256(mlos_file), _file_sha256(tp_file) if tp_file is not None else None)
+
+
+def get_uploaded_data(uploaded_file, mlos_digest, progress=None):
+    cache_key = mlos_digest
     if st.session_state.get("uploaded_cache_key") == cache_key:
         if progress is not None:
             progress.progress(100)
@@ -119,14 +138,17 @@ def get_uploaded_data(uploaded_file, progress=None):
         if progress is not None:
             progress.progress(value)
 
-    mlos_raw, takeoff_df = load_submission(
+    # Local name deliberately not "mlos_raw": the one-snapshot guard's mlos_raw-consumer
+    # assertion walks every call in the file regardless of scope, and a same-named local here
+    # would be indistinguishable from the module-scope mlos_raw it is meant to isolate.
+    _mlos_parsed, takeoff_df = load_submission(
         uploaded_file, uploaded_file.name, on_progress=_on_progress
     )
 
     # INTEG-03/D-08/D-09: normalise column names once, here, on both officer-supplied frames
     # from this upload — the MLoS frame and the same-upload Takeoffpoint frame. One helper
     # (qc.columns.normalize_columns), applied identically, so "normalised once" stays true.
-    mlos_raw, mlos_renames, mlos_collisions = qc.columns.normalize_columns(mlos_raw)
+    _mlos_parsed, mlos_renames, mlos_collisions = qc.columns.normalize_columns(_mlos_parsed)
     takeoff_df, tp_renames, tp_collisions = qc.columns.normalize_columns(takeoff_df)
 
     column_renames = {**mlos_renames, **tp_renames}
@@ -136,13 +158,13 @@ def get_uploaded_data(uploaded_file, progress=None):
     )
 
     st.session_state["uploaded_cache_key"] = cache_key
-    st.session_state["mlos_raw"] = mlos_raw
+    st.session_state["mlos_raw"] = _mlos_parsed
     st.session_state["takeoff_df"] = takeoff_df
     st.session_state["column_renames"] = column_renames
     st.session_state["column_collisions"] = column_collisions
     if progress is not None:
         progress.progress(100)
-    return mlos_raw, takeoff_df
+    return _mlos_parsed, takeoff_df
 
 
 # ─── Schema QC ───────────────────────────────────────────────────────────────────
@@ -326,7 +348,7 @@ def build_corrected_excel(df: pd.DataFrame) -> bytes:
 
 # ─── Excel Report Builder ─────────────────────────────────────────────────────────
 def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
-                        mlos_df, takeoff_df, column_renames=None):
+                        mlos_as_submitted, takeoff_df, column_renames=None):
     out = BytesIO()
     wb  = openpyxl.Workbook()
 
@@ -371,7 +393,7 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
     meta = [
         ("File",                   filename),
         ("Generated At",           datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        ("MLoS Rows",              len(mlos_df)),
+        ("MLoS Rows",              len(mlos_as_submitted)),
         ("Takeoffpoint Rows",      len(takeoff_df)),
         ("MLoS Checks Run",        len(mlos_checks)),
         ("MLoS Checks Failing",    sum(1 for c in mlos_checks if "FAIL" in c["Status"])),
@@ -459,7 +481,7 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
     write_detail (wb.create_sheet("MLoS Issue Detail"),      "MLoS Table — Detailed Issue Rows",        mlos_detail)
     write_summary(wb.create_sheet("Takeoffpoint QC Summary"),"Takeoffpoint Table — QC Check Summary",   tp_checks)
     write_detail (wb.create_sheet("Takeoffpoint Issue Detail"),"Takeoffpoint Table — Detailed Issues",  tp_detail)
-    write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_df)
+    write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_as_submitted)
     write_raw    (wb.create_sheet("Raw Takeoffpoint Data"),  takeoff_df)
 
     # ── Columns Renamed (INTEG-03/D-11) ───────────────────────────────────────────
@@ -513,6 +535,11 @@ with st.sidebar:
     )
     st.caption("Upload separately when MLoS file is `.csv`, or to override the built-in takeoffpoint sheet.")
 
+    # D-13: one content-identity computation, held in a module-scope local so the button
+    # handler here and the main body below reuse the same helper call rather than each
+    # constructing its own filename-and-size expression.
+    submission_identity = _submission_identity(uploaded, uploaded_tp) if uploaded is not None else None
+
     st.markdown("")
     run_qc_btn = st.button(
         "▶️ Run QC",
@@ -521,10 +548,7 @@ with st.sidebar:
         disabled=(uploaded is None),
     )
     if run_qc_btn and uploaded:
-        tp_key = (uploaded_tp.name, getattr(uploaded_tp, "size", None)) if uploaded_tp else None
-        st.session_state["submitted_key"] = (
-            uploaded.name, getattr(uploaded, "size", None), tp_key
-        )
+        st.session_state["submitted_key"] = submission_identity
     st.markdown("---")
     st.markdown("#### 📋 QC Rules Reference")
     with st.expander("🔧 Auto Correct Rules", expanded=False):
@@ -660,8 +684,9 @@ It overrides the built-in Takeoffpoint sheet for Excel/SQLite files.
     st.stop()
 
 # ─── Determine submitted state ────────────────────────────────────────────────────
-_tp_key = (uploaded_tp.name, getattr(uploaded_tp, "size", None)) if uploaded_tp else None
-_current_key = (uploaded.name, getattr(uploaded, "size", None), _tp_key)
+# D-13: submission_identity was computed once in the sidebar (both uploaded and uploaded_tp
+# were already available there); reused here rather than recomputed.
+_current_key = submission_identity
 _qc_submitted = st.session_state.get("submitted_key") == _current_key
 
 if not _qc_submitted:
@@ -672,7 +697,7 @@ if not _qc_submitted:
 load_progress = st.progress(0)
 with st.spinner("Loading file…"):
     try:
-        mlos_df, takeoff_df = get_uploaded_data(uploaded, progress=load_progress)
+        mlos_raw, takeoff_df = get_uploaded_data(uploaded, submission_identity[0], progress=load_progress)
     except Exception as e:
         st.error(f"❌ Failed to load file: {e}")
         st.stop()
@@ -716,17 +741,25 @@ if st.session_state.get("qc_cache_key") == qc_cache_key:
     tp_detail          = st.session_state["tp_detail"]
     boundary_checks    = st.session_state["boundary_checks"]
     boundary_detail    = st.session_state["boundary_detail"]
+    # D-14/ENGINE-03: the corrected frame and its correction log must ride the same cache as
+    # the checks computed from it, or a cache hit serves rows that disagree with those checks
+    # (F4). Read them back here rather than leaving the miss branch's only assignment stranded.
+    mlos_corrected     = st.session_state["mlos_corrected"]
+    autocorrect_log    = st.session_state["autocorrect_log"]
     load_progress.progress(100)
 else:
     qc_bar = st.progress(0, text="⏳ Starting QC checks…")
     with st.status("Running QC checks…", expanded=True) as _qc_status:
 
         # ── Pre-step: Auto Correct ────────────────────────────────────────
+        # ENGINE-03/ENGINE-04/D-14: this is the file's sole auto-correction call. It reads
+        # mlos_raw and produces mlos_corrected, cached below alongside the checks so a rerun's
+        # cache hit can never serve an uncorrected frame against corrected checks.
         st.write("🔧 Pre-step — Auto Correct")
-        mlos_df, _ac_log = qc.autocorrect.auto_correct_mlos(mlos_df)
-        _n_fixed = sum(r["Rows Fixed"] for r in _ac_log)
-        if _ac_log:
-            st.write(f"   ✅ Auto Correct: {len(_ac_log)} correction(s) applied, {_n_fixed:,} row(s) fixed")
+        mlos_corrected, autocorrect_log = qc.autocorrect.auto_correct_mlos(mlos_raw)
+        _n_fixed = sum(r["Rows Fixed"] for r in autocorrect_log)
+        if autocorrect_log:
+            st.write(f"   ✅ Auto Correct: {len(autocorrect_log)} correction(s) applied, {_n_fixed:,} row(s) fixed")
         else:
             st.write("   ✅ Auto Correct: no corrections needed")
 
@@ -734,7 +767,7 @@ else:
         qc_bar.progress(5, text="🔎 Step 1 / 5 — Schema Alignment…")
         st.write("🔎 Step 1 / 5 — Schema Alignment")
         schema_checks, schema_detail = qc.schema.run_schema_qc(
-            mlos_df, takeoff_df, collisions=st.session_state.get("column_collisions", ())
+            mlos_corrected, takeoff_df, collisions=st.session_state.get("column_collisions", ())
         )
         schema_checks = qc.sort_by_registry(schema_checks)
         schema_fail = sum(1 for c in schema_checks if "FAIL" in c["Status"])
@@ -745,7 +778,7 @@ else:
         # ── Step 2 / 5: MLoS Rules ───────────────────────────────────────
         qc_bar.progress(21, text="🏘️ Step 2 / 5 — MLoS Rules…")
         st.write("🏘️ Step 2 / 5 — MLoS Rules")
-        mlos_checks, mlos_detail = qc.mlos.run_mlos_qc(mlos_df, takeoff_df)
+        mlos_checks, mlos_detail = qc.mlos.run_mlos_qc(mlos_corrected, takeoff_df)
         mlos_checks = qc.sort_by_registry(mlos_checks)
         mlos_qc_fail = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if mlos_qc_fail else '✅'} MLoS: "
@@ -755,7 +788,7 @@ else:
         # ── Step 3 / 5: Settlement QC ────────────────────────────────────
         qc_bar.progress(41, text="📐 Step 3 / 5 — Settlement QC…")
         st.write("📐 Step 3 / 5 — Settlement QC")
-        settlement_checks, settlement_detail = qc.settlement.run_settlement_qc(mlos_df)
+        settlement_checks, settlement_detail = qc.settlement.run_settlement_qc(mlos_corrected)
         settlement_checks = qc.sort_by_registry(settlement_checks)
         sq_fail = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if sq_fail else '✅'} Settlement: "
@@ -769,7 +802,7 @@ else:
             tp_checks, tp_detail = [], pd.DataFrame()
             st.write("   ⚠️ Takeoffpoint data not available — skipped")
         else:
-            tp_checks, tp_detail = qc.takeoff.run_takeoff_qc(takeoff_df, mlos_df)
+            tp_checks, tp_detail = qc.takeoff.run_takeoff_qc(takeoff_df, mlos_corrected)
             tp_checks = qc.sort_by_registry(tp_checks)
             tp_qc_fail = sum(1 for c in tp_checks if "FAIL" in c["Status"])
             st.write(f"   {'❌' if tp_qc_fail else '✅'} Takeoffpoint: "
@@ -779,7 +812,7 @@ else:
         # ── Step 5 / 5: Boundary Checks ──────────────────────────────────
         qc_bar.progress(81, text="🗺️ Step 5 / 5 — Boundary Checks…")
         st.write("🗺️ Step 5 / 5 — Boundary Checks")
-        boundary_checks, boundary_detail = qc.boundary.run_ward_boundary_qc(mlos_df, boundary_ref, boundary_bbox)
+        boundary_checks, boundary_detail = qc.boundary.run_ward_boundary_qc(mlos_corrected, boundary_ref, boundary_bbox)
         boundary_checks = qc.sort_by_registry(boundary_checks)
         b_fail = sum(1 for c in boundary_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if b_fail else '✅'} Boundary: "
@@ -799,6 +832,8 @@ else:
     st.session_state["tp_detail"]          = tp_detail
     st.session_state["boundary_checks"]    = boundary_checks
     st.session_state["boundary_detail"]    = boundary_detail
+    st.session_state["mlos_corrected"]     = mlos_corrected
+    st.session_state["autocorrect_log"]    = autocorrect_log
 
 all_checks         = schema_checks + mlos_checks + settlement_checks + tp_checks + boundary_checks
 n_fail             = sum(1 for c in all_checks if "FAIL" in c["Status"])
@@ -834,10 +869,10 @@ boundary_score   = _layer_pass_rate(boundary_checks) * LAYER_WEIGHTS["boundary"]
 weighted_score   = schema_score + mlos_score + settlement_score + tp_score + boundary_score
 
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
-st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_df):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")
+st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_corrected):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")
 
 c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-c1.metric("📄 MLoS Rows",     f"{len(mlos_df):,}")
+c1.metric("📄 MLoS Rows",     f"{len(mlos_corrected):,}")
 c2.metric("🔍 Checks Run",    f"{len(all_checks)}")
 c3.metric("✅ Passing",       f"{n_pass}")
 c4.metric("❌ Failing",       f"{n_fail}")
@@ -965,7 +1000,11 @@ with tab1:
     )
     st.markdown("---")
 
-    corrected_df, correction_log = qc.autocorrect.auto_correct_mlos(mlos_df)
+    # ENGINE-04: no second auto-correction call here — that used to mint a fresh eha_guid for
+    # the download that the screen never saw (F5). Read the one cached snapshot instead,
+    # produced by the sole auto-correction call in the QC cache-miss branch above.
+    corrected_df    = mlos_corrected
+    correction_log  = autocorrect_log
 
     if not correction_log:
         st.success("✅ No corrections needed — all checked fields are already valid.")
@@ -1031,7 +1070,7 @@ with tab3:
         st.markdown("**📋 MLoS Issue Rows — Longitudinal View**")
         st.caption("One row per settlement. Each QC rule appears as a column: **Yes** = rule error present, **No** = no error.")
 
-        long_df = make_longitudinal_df(mlos_df, mlos_checks, mlos_detail)
+        long_df = make_longitudinal_df(mlos_corrected, mlos_checks, mlos_detail)
         if not long_df.empty:
             rule_flag_cols = [c for c in long_df.columns if str(c).startswith("Rule_")]
             # Convert booleans to emoji strings for visual clarity — avoids Styler compatibility issues
@@ -1040,7 +1079,7 @@ with tab3:
                 display_df[col] = display_df[col].map(lambda v: "Yes" if v is True else ("No" if v is False else v))
             st.dataframe(display_df, use_container_width=True, hide_index=True, height=350)
 
-        long_xlsx = build_longitudinal_mlos(mlos_df, mlos_checks, mlos_detail)
+        long_xlsx = build_longitudinal_mlos(mlos_corrected, mlos_checks, mlos_detail)
         st.download_button(
             "⬇️ Download MLoS Issues — Longitudinal (Excel)",
             data=long_xlsx,
@@ -1187,24 +1226,24 @@ with tab6:
 with tab7:
     rt1, rt2 = st.tabs(["🏘️ MLoS View", "📍 Takeoffpoint View"])
     with rt1:
-        st.markdown(f"**{len(mlos_df):,} rows × {len(mlos_df.columns)} columns**")
+        st.markdown(f"**{len(mlos_corrected):,} rows × {len(mlos_corrected.columns)} columns**")
         fc1, fc2, fc3 = st.columns(3)
         with fc1:
-            state_opts = ["All"] + sorted(mlos_df["state_name"].dropna().unique().tolist()) \
-                         if "state_name" in mlos_df.columns else ["All"]
+            state_opts = ["All"] + sorted(mlos_corrected["state_name"].dropna().unique().tolist()) \
+                         if "state_name" in mlos_corrected.columns else ["All"]
             sel_state = st.selectbox("State", state_opts, key="sel_state")
         with fc2:
-            if sel_state != "All" and "lga_name" in mlos_df.columns:
-                lga_opts = ["All"] + sorted(mlos_df[mlos_df["state_name"]==sel_state]["lga_name"].dropna().unique().tolist())
-            elif "lga_name" in mlos_df.columns:
-                lga_opts = ["All"] + sorted(mlos_df["lga_name"].dropna().unique().tolist())
+            if sel_state != "All" and "lga_name" in mlos_corrected.columns:
+                lga_opts = ["All"] + sorted(mlos_corrected[mlos_corrected["state_name"]==sel_state]["lga_name"].dropna().unique().tolist())
+            elif "lga_name" in mlos_corrected.columns:
+                lga_opts = ["All"] + sorted(mlos_corrected["lga_name"].dropna().unique().tolist())
             else:
                 lga_opts = ["All"]
             sel_lga = st.selectbox("LGA", lga_opts, key="sel_lga")
         with fc3:
             search = st.text_input("Search settlement", placeholder="Type to filter…", key="srch")
 
-        fdf = mlos_df.copy()
+        fdf = mlos_corrected.copy()
         if sel_state != "All" and "state_name" in fdf.columns:
             fdf = fdf[fdf["state_name"] == sel_state]
         if sel_lga != "All" and "lga_name" in fdf.columns:
@@ -1251,7 +1290,7 @@ with tab8:
         rrow("📁 File",                    filename),
         rrow("🕐 Generated At",            gen_time),
         rrow("━" * 36,                     "", "val-div"),
-        rrow("MLoS Rows",                  f"{len(mlos_df):,}"),
+        rrow("MLoS Rows",                  f"{len(mlos_corrected):,}"),
         rrow("Takeoffpoint Rows",          f"{len(takeoff_df):,}"),
         rrow("━" * 36,                     "", "val-div"),
         rrow("MLoS Checks Run",            str(len(mlos_checks))),
@@ -1312,7 +1351,7 @@ with tab8:
     with st.spinner("Building Excel report…"):
         report_bytes = build_excel_report(
             filename, mlos_checks, mlos_detail,
-            tp_checks, tp_detail, mlos_df, takeoff_df,
+            tp_checks, tp_detail, mlos_raw, takeoff_df,
             column_renames=st.session_state.get("column_renames", {}))
 
     report_file = filename.replace(".sqlite","").replace(".db","") + "_QC_Report.xlsx"
