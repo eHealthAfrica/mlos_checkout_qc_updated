@@ -60,7 +60,10 @@ ENGINE-08. Defects closed: F1, F6, F8, F11, F12, F14.
 
 - **D-04:** When every check that ran passed but a layer did not run, the verdict is still
   **CLEAN, with the gap named** in the same sentence: `CLEAN — Takeoffpoint layer not checked
-  (no Takeoffpoint data supplied)`. This wording is used identically by the on-screen banner
+  (no Takeoffpoint data supplied)`. **The same clause, in the same position, is appended to a
+  FAILING verdict** when a layer did not run: `FAILING (12 checks) — Takeoffpoint layer not
+  checked (no Takeoffpoint data supplied)` (amended 2026-09-10 after research surfaced the
+  gap; confirmed by the user). This wording is used identically by the on-screen banner
   (`app.py:848-858`), the Generate Report tab verdict (`app.py:1223-1231`), the report cover
   (`app.py:387-392`) and the email verdict line (`app.py:267`). The verdict stays two-state
   (CLEAN / FAILING); an `INCOMPLETE` third state was offered and not chosen. —
@@ -341,6 +344,7 @@ Exact strings the user approved, to be used verbatim or as the template for all 
 
 - Score: `72.0% of 80.0% achievable`
 - Verdict with a skipped layer: `CLEAN — Takeoffpoint layer not checked (no Takeoffpoint data
+  supplied)` / `FAILING (12 checks) — Takeoffpoint layer not checked (no Takeoffpoint data
   supplied)`
 - Summary-sheet placeholder row: `Takeoffpoint — not run: no Takeoffpoint data supplied`
 - Per-layer issue line: `312 issue rows (6.2% of 5,000) across 1,040 findings`
