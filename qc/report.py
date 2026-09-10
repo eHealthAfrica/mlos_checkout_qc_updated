@@ -85,6 +85,33 @@ class LayerSummary:
     def not_run_reason(self) -> str:
         return NOT_RUN_REASON.get(self.name, f"no {self.name} data supplied")
 
+    @property
+    def distinct_issue_rows(self) -> int:
+        """D-11: each source row counted once, keyed on the detail frame's own index (the
+        source frame's original row position) — never re-derived from a display-only merge
+        derivative (RESEARCH.md Pitfall 1)."""
+        return 0 if self.detail.empty else self.detail.index.nunique()
+
+    @property
+    def findings(self) -> int:
+        """D-12: the old rule-row-pair count, kept visible so an officer can reconcile the
+        headline distinct count against what the per-rule expanders add up to."""
+        return len(self.detail)
+
+    @property
+    def issue_line(self) -> str:
+        """D-13's approved per-layer line, e.g. "312 issue rows (6.2% of 5,000) across 1,040
+        findings" — the parenthesised share is omitted entirely when source_row_count is None
+        or 0, so no division by zero and no meaningless denominator is ever printed."""
+        if not self.ran:
+            return f"not run: {self.not_run_reason}"
+        distinct = self.distinct_issue_rows
+        findings = self.findings
+        if not self.source_row_count:
+            return f"{distinct:,} issue rows across {findings:,} findings"
+        share = f"{distinct / self.source_row_count * 100:.1f}%"
+        return f"{distinct:,} issue rows ({share} of {self.source_row_count:,}) across {findings:,} findings"
+
 
 @dataclass(frozen=True)
 class QcSummary:
@@ -148,6 +175,25 @@ class QcSummary:
         if self.weighted_score >= 60:
             return "amber"
         return "red"
+
+    @property
+    def headline_distinct(self) -> int:
+        """D-10: the plain sum of the four non-Schema layers' distinct counts — a settlement
+        failing in two layers counts twice in the headline and once in each layer. Schema is
+        excluded because it has no distinct-row line (its "rows" are columns, D-13)."""
+        return sum(
+            layer.distinct_issue_rows for name, layer in self.layers.items() if name != "Schema"
+        )
+
+    @property
+    def headline_findings(self) -> int:
+        return sum(
+            layer.findings for name, layer in self.layers.items() if name != "Schema"
+        )
+
+    @property
+    def headline_issue_line(self) -> str:
+        return f"{self.headline_distinct:,} issue rows across {self.headline_findings:,} findings"
 
 
 def build_summary(filename, layer_results, mlos_row_count, takeoff_row_count) -> QcSummary:

@@ -858,10 +858,6 @@ n_fail             = sum(1 for c in all_checks if "FAIL" in c["Status"])
 n_pass             = len(all_checks) - n_fail
 pct_pass           = f"{n_pass / len(all_checks) * 100:.1f}%" if all_checks else "0%"
 pct_fail           = f"{n_fail / len(all_checks) * 100:.1f}%" if all_checks else "0%"
-mlos_fail_rows     = len(mlos_detail)
-settlement_fail_rows = len(settlement_detail)
-tp_fail_rows       = len(tp_detail)
-boundary_fail_rows = len(boundary_detail)
 
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
 st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_corrected):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")
@@ -871,7 +867,7 @@ c1.metric("📄 MLoS Rows",     f"{len(mlos_corrected):,}")
 c2.metric("🔍 Checks Run",    f"{len(all_checks)}")
 c3.metric("✅ Passing",       f"{n_pass}")
 c4.metric("❌ Failing",       f"{n_fail}")
-c5.metric("⚠️ Issue Rows",   f"{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows:,}")
+c5.metric("⚠️ Issue Rows",   f"{summary.headline_distinct:,}", help=summary.headline_issue_line)
 c6.metric("📈 Pass Rate",     pct_pass)
 c7.metric("🏆 Weighted Score", f"{summary.weighted_score:.1f}%",
           help=f"of {summary.achievable_max:.1f}% achievable")
@@ -885,8 +881,10 @@ if n_fail == 0:
 else:
     st.markdown(
         f'<div class="banner-fail">❌ {n_fail} QC CHECK(S) FAILING — '
-        f'{mlos_fail_rows} MLoS rows, {settlement_fail_rows} Settlement rows, '
-        f'{tp_fail_rows} Takeoffpoint rows, and {boundary_fail_rows} Boundary rows have issues. '
+        f'{summary.layers["MLoS"].findings} MLoS rows, '
+        f'{summary.layers["Settlement"].findings} Settlement rows, '
+        f'{summary.layers["Takeoffpoint"].findings} Takeoffpoint rows, and '
+        f'{summary.layers["Boundary"].findings} Boundary rows have issues. '
         f'Review details below before submission.</div>',
         unsafe_allow_html=True)
 
@@ -1064,7 +1062,7 @@ with tab3:
         st.success("✅ No issues found in the MLoS table — all checks passed!")
     else:
         n_failing_checks = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{mlos_fail_rows:,} issue row(s)** across **{n_failing_checks} failing check(s)**")
+        st.error(f"❌ **{n_failing_checks} failing check(s)** — {summary.layers['MLoS'].issue_line}")
 
         for check in mlos_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1102,7 +1100,7 @@ with tab4:
         st.success("✅ No Settlement QC issues found — all checks passed!")
     else:
         n_failing_sq = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{settlement_fail_rows:,} issue row(s)** across **{n_failing_sq} failing check(s)**")
+        st.error(f"❌ **{n_failing_sq} failing check(s)** — {summary.layers['Settlement'].issue_line}")
 
         for check in settlement_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1136,7 +1134,7 @@ with tab5:
         st.success("✅ No issues found in the Takeoffpoint table — all checks passed!")
     else:
         n_failing_tp = sum(1 for c in tp_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{tp_fail_rows:,} issue row(s)** across **{n_failing_tp} failing check(s)**")
+        st.error(f"❌ **{n_failing_tp} failing check(s)** — {summary.layers['Takeoffpoint'].issue_line}")
 
         for check in tp_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1169,7 +1167,7 @@ with tab6:
     if n_b_fail == 0:
         st.success("✅ All ward codes match the boundary reference and all coordinates fall within their declared ward boundaries.")
     else:
-        st.error(f"❌ **{n_b_fail} boundary check(s) failing** — {boundary_fail_rows:,} issue row(s)")
+        st.error(f"❌ **{n_b_fail} boundary check(s) failing** — {summary.layers['Boundary'].issue_line}")
 
         for check in boundary_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1277,7 +1275,7 @@ with tab8:
     else:
         st.markdown(
             f'<div class="report-verdict-fail">❌ &nbsp; {n_fail} CHECK(S) FAILING — '
-            f'{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows} total issue rows. Fix before submission.</div>',
+            f'{summary.headline_distinct:,} total issue rows. Fix before submission.</div>',
             unsafe_allow_html=True)
 
     # Metadata card
@@ -1305,20 +1303,20 @@ with tab8:
         rrow("MLoS Checks Run",            str(len(mlos_checks))),
         rrow("MLoS Checks ✅ Passing",     str(mlos_n_pass),  "val-pass"),
         rrow("MLoS Checks ❌ Failing",     str(mlos_n_fail),  "val-fail" if mlos_n_fail else "val-pass"),
-        rrow("MLoS Issue Rows",            f"{mlos_fail_rows:,}",
-                                            "val-fail" if mlos_fail_rows else "val-pass"),
+        rrow("MLoS Issue Rows",            f"{summary.layers['MLoS'].findings:,}",
+                                            "val-fail" if summary.layers['MLoS'].findings else "val-pass"),
         rrow("━" * 36,                     "", "val-div"),
         rrow("Settlement Checks Run",      str(len(settlement_checks))),
         rrow("Settlement Checks ✅ Passing", str(sq_n_pass),  "val-pass"),
         rrow("Settlement Checks ❌ Failing", str(sq_n_fail),  "val-fail" if sq_n_fail else "val-pass"),
-        rrow("Settlement Issue Rows",      f"{settlement_fail_rows:,}",
-                                            "val-fail" if settlement_fail_rows else "val-pass"),
+        rrow("Settlement Issue Rows",      f"{summary.layers['Settlement'].findings:,}",
+                                            "val-fail" if summary.layers['Settlement'].findings else "val-pass"),
         rrow("━" * 36,                     "", "val-div"),
         rrow("Takeoffpoint Checks Run",    str(len(tp_checks))),
         rrow("Takeoffpoint Checks ✅ Passing", str(tp_n_pass),  "val-pass"),
         rrow("Takeoffpoint Checks ❌ Failing", str(tp_n_fail),  "val-fail" if tp_n_fail else "val-pass"),
-        rrow("Takeoffpoint Issue Rows",    f"{tp_fail_rows:,}",
-                                            "val-fail" if tp_fail_rows else "val-pass"),
+        rrow("Takeoffpoint Issue Rows",    f"{summary.layers['Takeoffpoint'].findings:,}",
+                                            "val-fail" if summary.layers['Takeoffpoint'].findings else "val-pass"),
     ])
     st.markdown(f'<div class="report-card">{html}</div>', unsafe_allow_html=True)
 
@@ -1376,7 +1374,7 @@ with tab8:
         st.success("✅ File is CLEAN — all checks passed.")
     else:
         st.warning(f"⚠️ {n_fail} check(s) failing with "
-                   f"{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows} issue rows. "
+                   f"{summary.headline_distinct:,} issue rows. "
                    f"Fix and re-upload before submission.")
 
     st.markdown("---")
@@ -1384,8 +1382,9 @@ with tab8:
     st.caption("Sends the QC summary to the data team. SMTP credentials must be configured in Streamlit secrets.")
     if st.button("📤 Send QC Email", type="primary", key="send_email_btn"):
         try:
-            send_qc_email(filename, all_checks, mlos_fail_rows,
-                          tp_fail_rows, schema_detail, boundary_fail_rows)
+            send_qc_email(filename, all_checks, summary.layers["MLoS"].findings,
+                          summary.layers["Takeoffpoint"].findings, schema_detail,
+                          summary.layers["Boundary"].findings)
             st.success("✅ Email sent successfully to the data team.")
         except Exception as e:
             st.error(f"❌ Failed to send email: {e}"

@@ -96,4 +96,8 @@ def run_takeoff_qc(takeoff: pd.DataFrame, mlos: pd.DataFrame):
         add("TP5","globalid is UUID","globalid must be a valid UUID",
             ~vec_is_uuid(takeoff["globalid"]), ["globalid"])
 
-    return checks, pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    # D-11: keep the original takeoff_df row position as the row identity distinct counting
+    # keys on — never re-derive it from an id column. An id_col key (ogc_fid, else the first
+    # column) was rejected: a CSV without ogc_fid may put a non-unique column first and
+    # undercount. Mirrors qc/mlos.py's pd.concat(details), which already omits ignore_index.
+    return checks, pd.concat(details) if details else pd.DataFrame()

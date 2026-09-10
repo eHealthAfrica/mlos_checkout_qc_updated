@@ -247,5 +247,9 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.D
             "Status": b4_status,
         })
 
-    detail_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    # D-11: keep the original mlos row position as the row identity distinct counting keys on
+    # — never re-derive it from an id column. An id_col key (ogc_fid, else the first column)
+    # was rejected: a CSV without ogc_fid may put a non-unique column first and undercount.
+    # Mirrors qc/mlos.py's pd.concat(details), which already omits ignore_index.
+    detail_df = pd.concat(details) if details else pd.DataFrame()
     return checks, detail_df
