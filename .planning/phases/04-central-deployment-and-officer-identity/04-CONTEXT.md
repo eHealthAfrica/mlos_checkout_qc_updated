@@ -100,6 +100,31 @@ Requirements closed: DEPLOY-01, DEPLOY-02, DEPLOY-03, DEPLOY-04, AUTH-01, AUTH-0
   `git log -S` on each address across all refs. "Removed from the working tree" (DEPLOY-02)
   and "removed from history" (DEPLOY-03) are separate tasks and separate acceptance criteria.
 
+### Space Visibility (DEPLOY-01) — added 2026-09-10 after research
+
+- **D-09:** The Space is **public at the platform level; the application's Google-domain gate is
+  the access control.** Research (04-RESEARCH.md, Open Question 1) established that a *private*
+  Hugging Face Space renders only for Hugging Face-authenticated collaborators, so a Google-only
+  officer would receive a 404 before `st.login` ever ran — irreconcilable with D-01. The user
+  chose a public Space over (a) adding every officer to an HF organisation (two identity
+  systems, the situation D-01 exists to avoid), (b) reverting to native HF OAuth, or (c) pausing
+  to test a throwaway Space first. Consequences the planner must implement:
+  - An unauthenticated visitor with the URL reaches **only** the sign-in screen: no uploader,
+    no tabs, no sidebar reference tables that describe the data, no cached frames. Every
+    `st.*` call that renders data is behind the gate (D-03 bypass excepted).
+  - The Space filesystem is ephemeral and the app persists nothing (PROJECT.md Storage
+    constraint); the plan adds a standing assertion that no upload is written to disk outside
+    the request, so a public page exposes nothing but the login prompt.
+  - **Wording changes are part of this phase's deliverables:** REQUIREMENTS.md DEPLOY-01
+    ("single private Hugging Face Space" → "single access-controlled Hugging Face Space, public
+    at the platform level, gated by app-level Google sign-in"), ROADMAP.md Phase 4 success
+    criterion 1 (drop "private"), and PROJECT.md's Privacy constraint ("The Space must be
+    private" → the gate, not Space visibility, is what protects the data). The planner writes
+    these as a docs task with acceptance criteria; the executor must not silently leave the
+    old wording that contradicts the shipped behaviour.
+  — **Reversibility:** reversible — flipping a Space to private is a settings change; the
+  app-level gate stays either way.
+
 ### Claude's Discretion
 
 - **Where auth code lives.** ROADMAP names an `auth.py` boundary; the planner chooses the
@@ -107,7 +132,7 @@ Requirements closed: DEPLOY-01, DEPLOY-02, DEPLOY-03, DEPLOY-04, AUTH-01, AUTH-0
   helper; the secrets.toml materialiser). It must be importable and unit-testable without a
   live Streamlit session where possible, following `qc/` and `qc/report.py` precedent, while
   the `st.login` / `st.user` calls themselves stay in `app.py` or a thin Streamlit-only module.
-- **Space metadata.** `sdk: streamlit` in the Space README front matter (research: Docker SDK
+- **Space metadata.** `sdk: streamlit` in the Space README front matter (visibility public per D-09) (research: Docker SDK
   loses the XSRF/iframe workaround `st.file_uploader` needs); Python 3.11 floor for
   `pandas==3.0.5`; free CPU basic hardware. Whether the Space README lives in this repo or
   the Space repo is the planner's call; the app must not depend on it either way.
