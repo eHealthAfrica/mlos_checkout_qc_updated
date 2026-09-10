@@ -132,12 +132,12 @@ Plans:
   4. The findings on screen describe the same version of the submission as the downloadable auto-corrected file, and a generated `eha_guid` is identical on first render and on every rerun
   5. A boundary-reference fallback to the full national set appears to the officer as a warning rather than silently widening B1
 
-**Plans**: 6 plans
+**Plans**: 1/6 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Tracer: absence predicate, pure loaders extracted to `qc/loaders.py`, and the three-format golden harness (INTEG-01, ENGINE-06)
+- [x] 02-01-PLAN.md — Tracer: absence predicate, pure loaders extracted to `qc/loaders.py`, and the three-format golden harness (INTEG-01, ENGINE-06)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -255,7 +255,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
-| 2. Detection Correctness and Three-Format Harness | 0/TBD | Not started | - |
+| 2. Detection Correctness and Three-Format Harness | 1/6 | In Progress|  |
 | 3. Verdict and Report Integrity | 0/TBD | Not started | - |
 | 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
 | 5. Submission Record | 0/TBD | Not started | - |

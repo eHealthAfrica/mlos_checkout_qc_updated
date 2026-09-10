@@ -24,7 +24,7 @@ that let a failing file be reported as clean.
 
 A verdict must not depend on upload format, and a check must not pass because a value is absent.
 
-- [ ] **INTEG-01**: Rule 1 flags missing required fields identically whether the submission arrives as `.sqlite`, `.csv` or `.xlsx` — closes F2
+- [x] **INTEG-01**: Rule 1 flags missing required fields identically whether the submission arrives as `.sqlite`, `.csv` or `.xlsx` — closes F2
 - [ ] **INTEG-02**: A blank value cannot satisfy a cross-table match rule (R2, R3, R4, TP2, TP3, TP4) — closes F9
 - [ ] **INTEG-03**: Column names are normalised once at load so schema alignment and the rules resolve the same columns; renames are reported to the officer — closes F7
 - [ ] **INTEG-04**: When state-name filtering yields no boundary reference and the check falls back to the full national set, that fallback appears as a visible warning rather than silently widening B1 — closes F13
@@ -38,7 +38,7 @@ Rule identity, state handling and the structural seam the new layers will be bui
 - [ ] **ENGINE-03**: Displayed data and computed checks always describe the same version of the submission, on the first render and on every subsequent rerun — closes F4
 - [ ] **ENGINE-04**: Auto-correction runs exactly once per submission and produces the same output each time it is displayed, including generated `eha_guid` values — closes F5
 - [x] **ENGINE-05**: All QC layers live in a `qc/` package containing no `import streamlit`, enforced by a test
-- [ ] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
+- [x] **ENGINE-06**: A pytest suite covers every rule, including a golden fixture asserting that the same data exported as `.sqlite`, `.csv` and `.xlsx` produces identical check summaries
 - [x] **ENGINE-07**: Dependencies are pinned with an upper bound, including `pandas==3.0.5` and an explicit `numpy` declaration
 - [ ] **ENGINE-08**: Raw-data report sheets are written without per-cell font and border assignment — closes F12
 - [x] **ENGINE-09**: Rule emission order is deterministic across application restarts, so two reports over identical data can be diffed row-for-row — closes F10 (`YN_NA_COLS` is a set literal at `app.py:100` and Python randomises string hashing per process, so Rule 12's eight checks currently appear in a different order every restart)
@@ -162,7 +162,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | VERDICT-04 | Phase 3 | Pending |
 | VERDICT-05 | Phase 3 | Pending |
 | VERDICT-06 | Phase 3 | Pending |
-| INTEG-01 | Phase 2 | Pending |
+| INTEG-01 | Phase 2 | Complete |
 | INTEG-02 | Phase 2 | Pending |
 | INTEG-03 | Phase 2 | Pending |
 | INTEG-04 | Phase 2 | Pending |
@@ -171,7 +171,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | ENGINE-03 | Phase 2 | Pending |
 | ENGINE-04 | Phase 2 | Pending |
 | ENGINE-05 | Phase 1 | Complete |
-| ENGINE-06 | Phase 2 | Pending |
+| ENGINE-06 | Phase 2 | Complete |
 | ENGINE-07 | Phase 1 | Complete |
 | ENGINE-08 | Phase 3 | Pending |
 | ENGINE-09 | Phase 1 | Complete |

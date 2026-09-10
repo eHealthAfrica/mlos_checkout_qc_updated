@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Detection Correctness and Three-Format Harness
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-09-10T09:59:27.343Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-09-10T10:52:21.030Z"
 last_activity: 2026-09-10
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
-state_head: 3b2e125ce0908ff2c2b3aaef49d8ae7384ca40cd
+last_activity_desc: Phase 02 execution started
+state_head: c99062c0e4540bdcc01d5e43f32f92703f10bc83
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 12
-  completed_plans: 6
+  completed_plans: 7
   percent: 14
 ---
 
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-09)
 
 **Core value:** A file this tool calls clean is clean.
-**Current focus:** Phase 01 — QC Engine Seam and Pinned Environment
+**Current focus:** Phase 02 — Detection Correctness and Three-Format Harness
 
 ## Current Position
 
-Phase: 02 (Detection Correctness and Three-Format Harness) — READY TO EXECUTE
-Plan: Not started
+Phase: 02 (Detection Correctness and Three-Format Harness) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-09-10 — Phase 01 complete, transitioned to Phase 2
+Last activity: 2026-09-10 — Phase 02 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P04 | 15min | 3 tasks | 5 files |
 | Phase 01 P05 | 12min | 3 tasks | 6 files |
 | Phase 01 P06 | 40min | 3 tasks | 7 files |
+| Phase 02 P01 | 42min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,9 @@ Recent decisions affecting current work:
 - [Phase 01]: [Phase 01] Fixed a pre-existing test-isolation leak in tests/test_results_registry.py's duplicate-id tests (throwaway identifiers left registered in the shared process-global registry), exposed by plan 06's new exact-set-equality rules-reference/registry test.
 - [Phase 01]: [Phase 01] Plan 06 Task 2 committed as a genuine RED-then-GREEN pair (unlike this phase's earlier parity tests): the test required a real production-code change (expanding the MLoS sidebar reference table) to turn green, verified failing first.
 - [Phase 01]: [Phase 01] Plan 06 followed the plan's narrow dead-import cleanup scope in app.py (FLAG_COLS, pct, vec_is_uuid, vec_is_editor only), leaving other already-unused qc.domain imports untouched as out of the plan's declared scope.
+- [Phase 02]: D-05 confirmed as written: uniform absence sentinel list for every column, exact literal NA exempted case-sensitively
+- [Phase 02]: Golden fixture's Takeoffpoint table carries no TAKEOFF_REQUIRED_COLS-named column so R2/R3/R4 stay silent uniformly across all three formats (Plan 02's INTEG-02 scope)
+- [Phase 02]: test_extraction_parity.py rescoped to a baseline-intersection comparison (planner decision 4) so plans 02/03/05 can register new rule identifiers without editing it again
 
 ### Pending Todos
 
@@ -114,6 +118,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T06:34:38.247Z
-Stopped at: Phase 2 context gathered
-Resume file: /Users/BusayoFashoto/Desktop/4_april_26/4th_april_2026/git_clone/mlos_checkout_qc/.planning/phases/02-detection-correctness-and-three-format-harness/02-CONTEXT.md
+Last session: 2026-09-10T10:52:20.986Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
