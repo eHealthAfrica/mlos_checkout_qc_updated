@@ -11,6 +11,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 import qc
+import qc.columns
 from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
 from qc.loaders import (
     MLOS_VIEW, TAKEOFF_VIEW, load_sqlite, load_view, load_csv, load_xlsx,
@@ -104,6 +105,14 @@ def get_uploaded_data(uploaded_file, progress=None):
     if st.session_state.get("uploaded_cache_key") == cache_key:
         if progress is not None:
             progress.progress(100)
+        # Cache hit (INTEG-03/D-11): the rename map and collision groups were written on the
+        # original parse below and persist in session state across reruns — read them back
+        # rather than recomputing, so a rerun that never re-parses the file still renders the
+        # rename panel and still feeds S3 with the original run's collision groups.
+        column_renames = st.session_state.get("column_renames", {})
+        column_collisions = st.session_state.get("column_collisions", [])
+        st.session_state["column_renames"] = column_renames
+        st.session_state["column_collisions"] = column_collisions
         return st.session_state["mlos_raw"], st.session_state["takeoff_df"]
 
     def _on_progress(value):
@@ -114,9 +123,23 @@ def get_uploaded_data(uploaded_file, progress=None):
         uploaded_file, uploaded_file.name, on_progress=_on_progress
     )
 
+    # INTEG-03/D-08/D-09: normalise column names once, here, on both officer-supplied frames
+    # from this upload — the MLoS frame and the same-upload Takeoffpoint frame. One helper
+    # (qc.columns.normalize_columns), applied identically, so "normalised once" stays true.
+    mlos_raw, mlos_renames, mlos_collisions = qc.columns.normalize_columns(mlos_raw)
+    takeoff_df, tp_renames, tp_collisions = qc.columns.normalize_columns(takeoff_df)
+
+    column_renames = {**mlos_renames, **tp_renames}
+    column_collisions = (
+        [{**group, "table": "MLoS"} for group in mlos_collisions]
+        + [{**group, "table": "Takeoffpoint"} for group in tp_collisions]
+    )
+
     st.session_state["uploaded_cache_key"] = cache_key
     st.session_state["mlos_raw"] = mlos_raw
     st.session_state["takeoff_df"] = takeoff_df
+    st.session_state["column_renames"] = column_renames
+    st.session_state["column_collisions"] = column_collisions
     if progress is not None:
         progress.progress(100)
     return mlos_raw, takeoff_df
@@ -633,6 +656,19 @@ if uploaded_tp is not None:
     try:
         uploaded_tp.seek(0)
         takeoff_df = load_takeoffpoint_file(uploaded_tp)
+        # INTEG-03/D-08/D-09: this file's headers are just as officer-supplied as the wrapper's
+        # two frames above, and this override runs after get_uploaded_data — so it must apply
+        # the same one helper and merge into (not replace) the two session-state keys.
+        takeoff_df, tp_override_renames, tp_override_collisions = qc.columns.normalize_columns(takeoff_df)
+        if tp_override_renames:
+            st.session_state["column_renames"] = {
+                **st.session_state.get("column_renames", {}),
+                **tp_override_renames,
+            }
+        if tp_override_collisions:
+            st.session_state["column_collisions"] = st.session_state.get(
+                "column_collisions", []
+            ) + [{**group, "table": "Takeoffpoint"} for group in tp_override_collisions]
     except Exception as e:
         st.warning(f"⚠️ Could not load Takeoffpoint file: {e} — takeoffpoint cross-checks will be skipped.")
         takeoff_df = pd.DataFrame()
