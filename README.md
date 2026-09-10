@@ -260,23 +260,31 @@ After all 5 layers run, the app calculates a **Weighted QC Score** that reflects
 
 **How it's calculated:**
 
-For each layer, the *layer pass rate* = number of passing rules ÷ total rules in that layer. The weighted contribution = layer pass rate × layer weight × 100.
+For each layer, the *layer pass rate* = number of passing checks ÷ total checks in that layer. A layer that ran **zero checks** has **no pass rate at all** — it contributes nothing to the score. The overall score is the plain sum of the contributions of the layers that ran, **never renormalised** across them, so a withheld table costs points as well as ceiling:
 
 ```
-Weighted Score = (Schema Pass Rate × 10%) + (MLoS Pass Rate × 40%)
-               + (Settlement Pass Rate × 20%) + (TP Pass Rate × 20%)
-               + (Boundary Pass Rate × 10%)
+Weighted Score       = Σ (Layer Pass Rate × Layer Weight × 100), summed only over layers that ran
+Achievable Maximum   = Σ (Layer Weight × 100), summed only over layers that ran
 ```
 
-> If a layer has no applicable checks (e.g. Takeoffpoint rules skipped for CSV uploads), that layer receives **full credit** (100% pass rate) so the score is not unfairly penalised.
+The total is always shown **against the achievable maximum**, wherever the weighted score appears (top metric bar, 📊 QC Summary tab, report cover, email): a submission with no Takeoffpoint table reads `72.0% of 80.0% achievable`, not a bare percentage, because the achievable ceiling itself drops by Takeoffpoint's 20% weight. A missing layer costs points and ceiling together — it is never scored as if it passed.
 
-The score and a breakdown table are shown in the **📊 QC Summary** tab. The 🏆 score also appears in the top metric bar on the dashboard.
+In the breakdown table on the **📊 QC Summary** tab, a layer that did not run shows **Layer Pass Rate `n/a`** and **Weighted Contribution `0`** (a number, not `n/a`, so the column still sums visibly to the total); its **Weight** column is unchanged. The Total row's contribution carries the achievable-maximum figure, e.g. `72.0% of 80.0% achievable`.
+
+The colour bands below are read from the **score out of 100**, never from the score relative to the achievable maximum — `72.0% of 80.0% achievable` is **amber**, not green. A missing layer costs colour as well as points, and a colour means the same thing on every file.
 
 | Score Range | Interpretation |
 |-------------|---------------|
 | 80% – 100% | Green — file is in good shape |
 | 60% – 79% | Amber — notable issues to review |
 | 0% – 59% | Red — significant data quality problems |
+
+**"Did not run"** means the layer produced **zero checks at all**; today only the Takeoffpoint layer can be in that state (no separate Takeoffpoint file supplied, and none present in the uploaded SQLite/workbook). When that happens, the verdict names the gap in the same sentence as the verdict itself — after **either** state:
+
+- `CLEAN — Takeoffpoint layer not checked (no Takeoffpoint data supplied)` — every check that ran passed
+- `FAILING (12 checks) — Takeoffpoint layer not checked (no Takeoffpoint data supplied)` — a check also failed elsewhere
+
+The verdict stays two-state (CLEAN / FAILING); there is no third "incomplete" state. No skipped layer is ever scored as though it passed.
 
 ---
 
@@ -296,11 +304,28 @@ The **MLoS Issues** tab includes a longitudinal (wide-format) view of all settle
 
 Go to the **Generate Report** tab to:
 
-1. See the overall QC verdict: `✅ CLEAN` or `❌ FAILING`
+1. See the overall QC verdict and weighted score for all five layers
 2. Click **Generate Report** to produce a detailed Excel workbook
 3. Download and share with the data team or programme leads
 
 The report file is named: `{filename}_QC_Report.xlsx`
+
+The workbook always contains the same sheets, in this order, whether the submission is clean or failing:
+
+1. **QC Report Cover** — the verdict and the weighted score (with its achievable maximum), plus file metadata: filename, generated-at timestamp, MLoS row count, Takeoffpoint row count. Per-layer counts live on the summary sheet below, not the cover.
+2. **QC Summary** — one combined sheet listing every check that ran, in registry rule order, with a `Layer` column. A layer that ran zero checks appears here as a single placeholder row naming the gap — e.g. `Takeoffpoint — not run: no Takeoffpoint data supplied` — with `n/a` in its Failing Rows, Total Rows and Fail % columns, so the sheet alone can never read as a four-layer tool.
+3. **Schema Issue Detail**
+4. **MLoS Issue Detail**
+5. **Settlement Issue Detail**
+6. **Takeoffpoint Issue Detail**
+7. **Boundary Issue Detail**
+8. **Raw MLoS Data**
+9. **Raw Takeoffpoint Data**
+10. **Columns Renamed** — present only when a header was renamed at load (see §2); a clean-header submission gets no sheet at all, not an empty one.
+
+The two per-layer summary sheets this report used to produce (`MLoS QC Summary`, `Takeoffpoint QC Summary`) are gone — replaced by the one combined **QC Summary** sheet above. Automation pointed at the old sheet names will need updating.
+
+The detail and raw-data sheets are written as plain values with a styled header row and column widths only — no per-cell colour or border — to keep the workbook within the hosting memory budget.
 
 ---
 
@@ -312,8 +337,10 @@ Click **Send QC Email** in the Generate Report tab to notify the data team.
 |-------|-------|
 | **To** | adanna.alex@ehealthnigeria.org |
 | **CC** | fashoto.busayo@ehealthnigeria.org, victor.idakwo@ehealthnigeria.org, oluwadamilare.akindipe@ehealthnigeria.org |
-| **Subject** | MLoS QC checks for `{filename}` |
-| **Body** | Full check-by-check summary with verdict, issue counts, and missing columns |
+| **Subject** | Carries the verdict: `MLoS QC: FAILING (12 checks) — kano_checkout.xlsx` or `MLoS QC: CLEAN — kano_checkout.xlsx` |
+| **Body** | Plain text: the verdict sentence; the weighted score with its achievable maximum; the headline issue-rows figure; one block per layer (in canonical order) with checks run, checks failing and its issue-rows line — or `not run: no Takeoffpoint data supplied` for a layer that did not run; the existing missing-columns block; then a check-by-check list grouped under layer headings, in rule order |
+
+A clean email still lists **every check that ran**, passing and failing, so the reader can see exactly what was verified. The renamed-columns report (§2) is not part of the email — it stays in the on-screen expander and the report's Columns Renamed sheet only.
 
 SMTP credentials must be configured in Streamlit secrets:
 
