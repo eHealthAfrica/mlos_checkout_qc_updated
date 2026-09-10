@@ -400,7 +400,7 @@ ADRs. `README.md` is the only non-`.planning/` document with canonical authority
   therefore stays in `app.py`. Phase 1's D-08 parked loader extraction here, so splitting
   pure parsing from the caching wrapper is this phase's work.
 - The rule identifier is the join key between `checks` and `detail`. Three consumers read it
-  and all must accept the ten new identifiers: `make_longitudinal_df` at `app.py:217`, the
+  and all must accept the nine new identifiers: `make_longitudinal_df` at `app.py:217`, the
   per-rule drilldown expanders, and per-rule Excel sheet naming (`f"Rule {rn}"[:31]`).
 - The sidebar rules-reference tables document identifiers as static markdown, and
   `tests/test_rules_reference_matches_registry.py` asserts they agree with the registry — so
