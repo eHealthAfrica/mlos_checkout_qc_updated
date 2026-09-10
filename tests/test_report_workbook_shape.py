@@ -12,11 +12,15 @@ boundary reference CSVs, no Streamlit runtime, and no real QC engine run.
 """
 
 import io
+from pathlib import Path
 
 import openpyxl
 import pandas as pd
 
+import qc
 import qc.report as report
+
+APP_PATH = Path(__file__).resolve().parent.parent / "app.py"
 
 
 def _passing(rule_ids):
@@ -144,3 +148,194 @@ def test_verdict_row_is_below_the_metadata_block():
     ]
     assert meta_rows and verdict_rows
     assert max(meta_rows) < min(verdict_rows)
+
+
+# ── Task 2: one combined summary sheet plus a detail sheet per layer (D-06/D-07) ────────────
+
+EXPECTED_SHEET_NAMES = (
+    "QC Report Cover", "QC Summary", "Schema Issue Detail", "MLoS Issue Detail",
+    "Settlement Issue Detail", "Takeoffpoint Issue Detail", "Boundary Issue Detail",
+    "Raw MLoS Data", "Raw Takeoffpoint Data",
+)
+
+
+def _summary_for_sheet_shape():
+    """Every layer runs; MLoS and Boundary each carry one failing check with its own
+    distinctive detail column, so the two detail sheets can be proven un-merged."""
+    layers = {
+        "Schema": (_passing(["S1", "S2", "S3"]), pd.DataFrame()),
+        "MLoS": (
+            _passing(["1"]) + _failing(["2"]),
+            pd.DataFrame({"Rule#": ["2"], "Rule": ["Takeoffpoint Name Match"],
+                          "settlement_name": ["Bravo"]}),
+        ),
+        "Settlement": (_passing(["SQ1"]), pd.DataFrame()),
+        "Takeoffpoint": (_passing(["TP2"]), pd.DataFrame()),
+        "Boundary": (
+            _passing(["B0"]) + _failing(["B1"]),
+            pd.DataFrame({"Rule#": ["B1"], "Rule": ["Ward Code — Boundary Reference"],
+                          "ward_code": ["00000"]}),
+        ),
+    }
+    return report.build_summary("kano_checkout.xlsx", layers, mlos_row_count=10, takeoff_row_count=5)
+
+
+def test_sheet_names_constant_matches_d06_order():
+    assert report.SHEET_NAMES == EXPECTED_SHEET_NAMES
+
+
+def test_sheet_names_are_exactly_the_d06_order_with_no_renames():
+    summary = _summary_for_sheet_shape()
+    wb, _ = _cover_sheet(summary)
+    assert wb.sheetnames == list(EXPECTED_SHEET_NAMES)
+
+
+def test_sheet_names_append_columns_renamed_when_a_rename_occurred():
+    summary = _summary_for_sheet_shape()
+    wb, _ = _cover_sheet(summary, column_renames={"Old Header": "new_header"})
+    assert wb.sheetnames == list(EXPECTED_SHEET_NAMES) + ["Columns Renamed"]
+
+
+def test_sheet_names_identical_for_an_all_passing_all_empty_submission():
+    layers = {
+        "Schema": (_passing(["S1"]), pd.DataFrame()),
+        "MLoS": (_passing(["1"]), pd.DataFrame()),
+        "Settlement": (_passing(["SQ1"]), pd.DataFrame()),
+        "Takeoffpoint": (_passing(["TP2"]), pd.DataFrame()),
+        "Boundary": (_passing(["B0"]), pd.DataFrame()),
+    }
+    summary = report.build_summary("f.xlsx", layers, mlos_row_count=5, takeoff_row_count=5)
+    wb, _ = _cover_sheet(summary)
+    assert wb.sheetnames == list(EXPECTED_SHEET_NAMES)
+
+
+def test_summary_sheet_header_row_is_the_eight_columns():
+    summary = _summary_for_sheet_shape()
+    out = report.build_workbook(summary, _mlos_raw(), _takeoff_df())
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    ws = wb["QC Summary"]
+    header = [ws.cell(row=2, column=c).value for c in range(1, 9)]
+    assert header == ["Layer", "Status", "Rule#", "QC Check", "Description",
+                       "Failing Rows", "Total Rows", "Fail %"]
+
+
+def _summary_sheet_rows(wb):
+    ws = wb["QC Summary"]
+    rows = []
+    for r in range(3, ws.max_row + 1):
+        rows.append({
+            "Layer": ws.cell(row=r, column=1).value,
+            "Status": ws.cell(row=r, column=2).value,
+            "Rule#": ws.cell(row=r, column=3).value,
+            "QC Check": ws.cell(row=r, column=4).value,
+            "Failing Rows": ws.cell(row=r, column=6).value,
+            "Total Rows": ws.cell(row=r, column=7).value,
+            "Fail %": ws.cell(row=r, column=8).value,
+        })
+    return rows
+
+
+def test_summary_sheet_rule_column_matches_canonical_order_of_ran_identifiers():
+    summary = _summary_for_sheet_shape()
+    out = report.build_workbook(summary, _mlos_raw(), _takeoff_df())
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    rows = _summary_sheet_rows(wb)
+    ran_ids = {"S1", "S2", "S3", "1", "2", "SQ1", "TP2", "B0", "B1"}
+    actual_ids = [r["Rule#"] for r in rows if r["Rule#"] != "—"]
+    expected_ids = [r for r in qc.canonical_order() if r in ran_ids]
+    assert actual_ids == expected_ids
+
+
+def test_summary_sheet_layer_column_first_appearance_order_matches_layer_order():
+    summary = _summary_for_sheet_shape()
+    out = report.build_workbook(summary, _mlos_raw(), _takeoff_df())
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    ws = wb["QC Summary"]
+    seen = []
+    for r in range(3, ws.max_row + 1):
+        layer = ws.cell(row=r, column=1).value
+        if layer and layer not in seen:
+            seen.append(layer)
+    assert seen == list(report.LAYER_ORDER)
+
+
+def test_a_layer_that_ran_one_check_yields_exactly_one_row_for_that_layer():
+    summary = _summary_for_sheet_shape()
+    out = report.build_workbook(summary, _mlos_raw(), _takeoff_df())
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    rows = _summary_sheet_rows(wb)
+    settlement_rows = [r for r in rows if r["Layer"] == "Settlement"]
+    assert len(settlement_rows) == 1
+    assert settlement_rows[0]["Rule#"] == "SQ1"
+
+
+def test_empty_takeoffpoint_yields_one_placeholder_row_with_na_cells_between_settlement_and_boundary():
+    layers = {
+        "Schema": (_passing(["S1"]), pd.DataFrame()),
+        "MLoS": (_passing(["1"]), pd.DataFrame()),
+        "Settlement": (_passing(["SQ1"]), pd.DataFrame()),
+        "Takeoffpoint": ([], pd.DataFrame()),
+        "Boundary": (_passing(["B0"]), pd.DataFrame()),
+    }
+    summary = report.build_summary("f.xlsx", layers, mlos_row_count=5, takeoff_row_count=0)
+    out = report.build_workbook(summary, _mlos_raw(), _takeoff_df(empty=True))
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    rows = _summary_sheet_rows(wb)
+    tp_rows = [r for r in rows if r["QC Check"] == "Takeoffpoint — not run: no Takeoffpoint data supplied"]
+    assert len(tp_rows) == 1
+    tp_row = tp_rows[0]
+    assert tp_row["Failing Rows"] == "n/a"
+    assert tp_row["Total Rows"] == "n/a"
+    assert tp_row["Fail %"] == "n/a"
+    idx = rows.index(tp_row)
+    assert rows[idx - 1]["Layer"] == "Settlement"
+    assert rows[idx + 1]["Layer"] == "Boundary"
+
+
+def test_detail_sheets_keep_their_own_layers_columns_not_merged():
+    summary = _summary_for_sheet_shape()
+    out = report.build_workbook(summary, _mlos_raw(), _takeoff_df())
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    mlos_header = [c.value for c in wb["MLoS Issue Detail"][2]]
+    boundary_header = [c.value for c in wb["Boundary Issue Detail"][2]]
+    assert "settlement_name" in mlos_header
+    assert "ward_code" not in mlos_header
+    assert "ward_code" in boundary_header
+    assert "settlement_name" not in boundary_header
+
+
+def test_detail_sheet_body_row_counts_match_findings_and_raw_sheet_matches_input_rows():
+    summary = _summary_for_sheet_shape()
+    mlos_raw_df = _mlos_raw()
+    out = report.build_workbook(summary, mlos_raw_df, _takeoff_df())
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    mlos_ws = wb["MLoS Issue Detail"]
+    assert mlos_ws.max_row - 2 == summary.layers["MLoS"].findings
+    boundary_ws = wb["Boundary Issue Detail"]
+    assert boundary_ws.max_row - 2 == summary.layers["Boundary"].findings
+    raw_ws = wb["Raw MLoS Data"]
+    assert raw_ws.max_row - 1 == len(mlos_raw_df)
+
+
+def test_summary_rows_raises_naming_the_identifier_when_a_check_is_misfiled_under_the_wrong_layer():
+    layers = {
+        "Schema": (_passing(["S1"]), pd.DataFrame()),
+        "MLoS": (_passing(["B0"]), pd.DataFrame()),  # B0 is registered under Boundary, not MLoS
+        "Settlement": (_passing(["SQ1"]), pd.DataFrame()),
+        "Takeoffpoint": (_passing(["TP2"]), pd.DataFrame()),
+        "Boundary": (_passing(["B0"]), pd.DataFrame()),
+    }
+    summary = report.build_summary("f.xlsx", layers, mlos_row_count=5, takeoff_row_count=5)
+    try:
+        report.summary_rows(summary)
+        assert False, "expected ValueError for a misfiled rule id"
+    except ValueError as e:
+        assert "B0" in str(e)
+        assert "MLoS" in str(e)
+        assert "Boundary" in str(e)
+
+
+def test_app_caption_names_the_new_sheets_and_drops_the_old_mlos_summary_name():
+    src = APP_PATH.read_text(encoding="utf-8")
+    assert "Boundary Issue Detail" in src
+    assert "MLoS QC Summary" not in src
