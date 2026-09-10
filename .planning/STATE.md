@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 3
-current_phase_name: Verdict and Report Integrity
+current_phase: 02
+current_phase_name: Detection Correctness and Three-Format Harness
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-09-10T16:17:19.416Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-09-10T17:04:30.501Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 02 execution started
-state_head: 54bfd2cbba2844fe5a9bd13f32f71ac68759735f
+state_head: 00121113fb2fc71355fa826a1f2c743300acd513
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 16
-  completed_plans: 9
+  completed_plans: 10
   percent: 14
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 
 ## Current Position
 
-Phase: 3 (Verdict and Report Integrity) — READY TO EXECUTE
-Plan: 3 of 6
+Phase: 02 (Detection Correctness and Three-Format Harness) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 02 execution started
 
@@ -67,6 +67,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 02 P01 | 42min | 3 tasks | 9 files |
 | Phase 02 P02 | 15min | 2 tasks | 5 files |
 | Phase 02 P03 | 25min | 2 tasks | 5 files |
+| Phase 02 P04 | 3h 37m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -100,6 +101,8 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 02 Plan 02: rebuilt R2/R3/R4 and TP2/TP3/TP4 cross-table match masks to exclude absent source cells and registered six new .missing identifiers, closing INTEG-02 (F9). — A blank source cell must fail its own .missing check and be excluded from the match rule, or D-03's exactly-three-checks invariant breaks into four.
 - [Phase 02]: [Phase 02] qc/columns.py carries zero relative sibling imports by design — normalize_name/normalize_columns perform no canonical-set lookup or aliasing (D-08/D-09), so the plan's from-dot-import acceptance criterion is a documented, unsatisfiable-by-design discrepancy rather than a forced dead import.
 - [Phase 02]: [Phase 02] Plan 03: S1/S2's column-set comparison changed from a lower-cased projection to the frame's raw columns, removing qc/schema.py's own second, diverging view of the column set (F7's root cause), proven behaviour-neutral for the shared fixture.
+- [Phase 02]: [Phase 02] Plan 04: qc.columns.normalize_columns is now called at all three officer-supplied load paths (MLoS frame, same-upload Takeoffpoint frame, separately-uploaded Takeoffpoint override), closing F7 -- a non-canonically spelled header no longer satisfies S1 while silently skipping its rules. — Collision groups are tagged with their source table and merged (not overwritten) across all three load sites into two session-state keys, so the on-screen rename panel and the Columns Renamed report sheet always read the same single source of truth -- the exact two-sources-of-truth shape F7 was.
+- [Phase 02]: [Phase 02] Plan 04: Column renames are reported to the officer in exactly two places -- an on-screen expander in Tab 1 and a conditional Columns Renamed sheet in the downloaded report -- with no Pass/Fail and no score weight, verified live per D-11 (Task 3 checkpoint, all four verdicts pass). — build_excel_report's new column_renames keyword parameter defaults to None so existing callers keep working, and an AST-level acceptance check confirms the rename record never enters all_checks or LAYER_WEIGHTS.
 
 ### Pending Todos
 
@@ -123,6 +126,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T15:33:42.255Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-verdict-and-report-integrity/03-CONTEXT.md
+Last session: 2026-09-10T17:04:30.455Z
+Stopped at: Completed 02-04-PLAN.md
+Resume file: None
