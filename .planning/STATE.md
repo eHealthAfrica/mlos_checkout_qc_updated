@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Detection Correctness and Three-Format Harness
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-09-10T12:58:51.428Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-09-10T13:13:21.932Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 02 execution started
-state_head: d69fe62f03540bcb41a943979d5b6c3fd2b3f8a5
+state_head: f954681adcad86dccfa9375ed7c38167334a45b7
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 9
   percent: 14
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-09)
 ## Current Position
 
 Phase: 02 (Detection Correctness and Three-Format Harness) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 02 execution started
 
@@ -66,6 +66,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 01 P06 | 40min | 3 tasks | 7 files |
 | Phase 02 P01 | 42min | 3 tasks | 9 files |
 | Phase 02 P02 | 15min | 2 tasks | 5 files |
+| Phase 02 P03 | 25min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,8 @@ Recent decisions affecting current work:
 - [Phase 02]: Golden fixture's Takeoffpoint table carries no TAKEOFF_REQUIRED_COLS-named column so R2/R3/R4 stay silent uniformly across all three formats (Plan 02's INTEG-02 scope)
 - [Phase 02]: test_extraction_parity.py rescoped to a baseline-intersection comparison (planner decision 4) so plans 02/03/05 can register new rule identifiers without editing it again
 - [Phase 02]: Phase 02 Plan 02: rebuilt R2/R3/R4 and TP2/TP3/TP4 cross-table match masks to exclude absent source cells and registered six new .missing identifiers, closing INTEG-02 (F9). — A blank source cell must fail its own .missing check and be excluded from the match rule, or D-03's exactly-three-checks invariant breaks into four.
+- [Phase 02]: [Phase 02] qc/columns.py carries zero relative sibling imports by design — normalize_name/normalize_columns perform no canonical-set lookup or aliasing (D-08/D-09), so the plan's from-dot-import acceptance criterion is a documented, unsatisfiable-by-design discrepancy rather than a forced dead import.
+- [Phase 02]: [Phase 02] Plan 03: S1/S2's column-set comparison changed from a lower-cased projection to the frame's raw columns, removing qc/schema.py's own second, diverging view of the column set (F7's root cause), proven behaviour-neutral for the shared fixture.
 
 ### Pending Todos
 
@@ -120,6 +123,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T12:58:51.390Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-09-10T13:13:21.883Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
