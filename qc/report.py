@@ -543,9 +543,8 @@ def build_email_subject_and_body(summary: QcSummary) -> "tuple[str, str]":
     transport (``smtplib``), so it is unit-testable without a Streamlit runtime or an SMTP mock.
     ``app.py``'s ``send_qc_email`` calls this and stays a thin SMTP sender.
 
-    Task 1's scope is the seam, the subject and the header block. Task 2 adds the per-layer
-    blocks (D-14), the Schema missing-columns block and the grouped check-by-check list (D-15)
-    between the header and the footer.
+    Task 2 adds the per-layer blocks (D-14), the Schema missing-columns block and the grouped
+    check-by-check list (D-15) between the header and the footer.
     """
     # D-16: verdict_short, not verdict_text -- the two approved subjects carry no unrun-layer
     # gap clause, and appending the full sentence would put two em-dash separators in one
@@ -566,6 +565,58 @@ def build_email_subject_and_body(summary: QcSummary) -> "tuple[str, str]":
         f"Checks Failing    : {summary.n_fail}",
         f"Issue Rows        : {summary.headline_issue_line}",
     ]
+
+    # D-14: one block per layer, in canonical order, built by iterating LAYER_ORDER and reading
+    # summary.layers[name] -- never by naming layers one at a time, which is the shape that left
+    # Settlement out of today's body (F11/VERDICT-03). Counts and percentages only -- no
+    # detail-frame cell value enters a block, so no settlement name, coordinate or population
+    # figure leaves the deployment in an email.
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("Layer Summary")
+    lines.append("-" * 60)
+    for name in LAYER_ORDER:
+        layer = summary.layers[name]
+        lines.append(name)
+        if not layer.ran:
+            lines.append(f"    {layer.issue_line}")
+            continue
+        lines.append(f"    Checks Run     : {len(layer.checks)}")
+        lines.append(f"    Checks Failing : {layer.n_fail}")
+        # D-13: every layer except Schema carries an Issue Rows line -- Schema's rows are
+        # missing columns, not source rows, so it has no distinct-row line (same precedent the
+        # workbook's summary sheet and the on-screen tabs already follow).
+        if name != "Schema":
+            lines.append(f"    Issue Rows     : {layer.issue_line}")
+
+    # The existing Schema missing-columns block stays (D-14) -- reads the Schema layer's own
+    # detail frame off the summary object, never a separate argument, and emits nothing at all
+    # when that frame is empty.
+    schema_detail = summary.layers["Schema"].detail
+    if not schema_detail.empty:
+        lines.append("")
+        missing = schema_detail[["Table", "Missing Column"]].to_string(index=False)
+        lines.append("Missing Columns:")
+        lines.append(missing)
+
+    # D-15: every check that ran, passing and failing, grouped under its layer heading in
+    # registry canonical order -- so a CLEAN email still shows exactly what was checked. Reuses
+    # the existing per-check line shape (Analog F, 03-PATTERNS.md). A layer that did not run
+    # contributes no check lines here, only its Layer Summary block above.
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("Check-by-Check Summary")
+    lines.append("-" * 60)
+    for name in LAYER_ORDER:
+        layer = summary.layers[name]
+        if not layer.ran:
+            continue
+        lines.append(name)
+        for check in sort_by_registry(layer.checks):
+            lines.append(
+                f"[{check['Status']}] Rule {check['Rule#']}: {check['QC Check']} — "
+                f"{check['Failing Rows']} failing / {check['Total Rows']} ({check['Fail %']})"
+            )
 
     lines.append("")
     lines.append("=" * 60)
