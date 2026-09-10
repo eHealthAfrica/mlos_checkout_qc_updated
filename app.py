@@ -498,6 +498,7 @@ with st.sidebar:
 |------|-------|
 | S1 | All 43 required MLoS columns present |
 | S2 | All 4 required Takeoffpoint columns present |
+| S3 | No two original headers normalise to the same column name |
 
 **MLoS required columns:**
 `state_code`, `state_name`, `lga_code`, `lga_name`, `ward_name`, `ward_code`, `takeoffpoint`, `takeoffpoint_code`, `settlement_name`, `primarysettlement_name`, `alternate_name`, `latitude`, `longitude`, `security_compromised`, `accessibility_status`, `reasons_for_inaccessibility`, `habitational_status`, `set_population`, `set_target`, `number_of_household`, `noncompliant_household`, `team_code`, `day_of_activity`, `urban`, `rural`, `highrisk`, `slums`, `densely_populated`, `hard2reach`, `border`, `nomadic`, `scattered`, `riverine`, `fulani`, `timestamp`, `source`, `last_updated`, `editor`, `validation_status`, `master_id`, `mlos_id`, `eha_guid`, `settlementarea_globalid`
@@ -670,7 +671,9 @@ else:
         # ── Step 1 / 5: Schema Alignment ─────────────────────────────────
         qc_bar.progress(5, text="🔎 Step 1 / 5 — Schema Alignment…")
         st.write("🔎 Step 1 / 5 — Schema Alignment")
-        schema_checks, schema_detail = qc.schema.run_schema_qc(mlos_df, takeoff_df)
+        schema_checks, schema_detail = qc.schema.run_schema_qc(
+            mlos_df, takeoff_df, collisions=st.session_state.get("column_collisions", ())
+        )
         schema_checks = qc.sort_by_registry(schema_checks)
         schema_fail = sum(1 for c in schema_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if schema_fail else '✅'} Schema: "
