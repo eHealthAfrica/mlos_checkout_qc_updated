@@ -1054,8 +1054,7 @@ with tab3:
     if mlos_detail.empty:
         st.success("✅ No issues found in the MLoS table — all checks passed!")
     else:
-        n_failing_checks = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{n_failing_checks} failing check(s)** — {summary.layers['MLoS'].issue_line}")
+        st.error(f"❌ **{summary.layers['MLoS'].n_fail} failing check(s)** — {summary.layers['MLoS'].issue_line}")
 
         for check in mlos_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1092,8 +1091,7 @@ with tab4:
     if settlement_detail.empty:
         st.success("✅ No Settlement QC issues found — all checks passed!")
     else:
-        n_failing_sq = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{n_failing_sq} failing check(s)** — {summary.layers['Settlement'].issue_line}")
+        st.error(f"❌ **{summary.layers['Settlement'].n_fail} failing check(s)** — {summary.layers['Settlement'].issue_line}")
 
         for check in settlement_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1126,8 +1124,7 @@ with tab5:
     if tp_detail.empty:
         st.success("✅ No issues found in the Takeoffpoint table — all checks passed!")
     else:
-        n_failing_tp = sum(1 for c in tp_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{n_failing_tp} failing check(s)** — {summary.layers['Takeoffpoint'].issue_line}")
+        st.error(f"❌ **{summary.layers['Takeoffpoint'].n_fail} failing check(s)** — {summary.layers['Takeoffpoint'].issue_line}")
 
         for check in tp_checks:
             if "FAIL" not in check["Status"]: continue
@@ -1156,7 +1153,7 @@ with tab5:
 
 # ── Tab 6: Boundary Issues ────────────────────────────────────────────────────────
 with tab6:
-    n_b_fail = sum(1 for c in boundary_checks if "FAIL" in c["Status"])
+    n_b_fail = summary.layers["Boundary"].n_fail
     if n_b_fail == 0:
         st.success("✅ All ward codes match the boundary reference and all coordinates fall within their declared ward boundaries.")
     else:
@@ -1272,14 +1269,9 @@ with tab8:
             f'{summary.headline_issue_line}. Fix before submission.</div>',
             unsafe_allow_html=True)
 
-    # Metadata card
-    gen_time      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mlos_n_fail   = sum(1 for c in mlos_checks       if "FAIL" in c["Status"])
-    mlos_n_pass   = len(mlos_checks)   - mlos_n_fail
-    sq_n_fail     = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
-    sq_n_pass     = len(settlement_checks) - sq_n_fail
-    tp_n_fail     = sum(1 for c in tp_checks         if "FAIL" in c["Status"])
-    tp_n_pass     = len(tp_checks)     - tp_n_fail
+    # Metadata card — every count read from the shared summary, never re-derived (F1's shape).
+    gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _mlos_l, _sq_l, _tp_l = summary.layers["MLoS"], summary.layers["Settlement"], summary.layers["Takeoffpoint"]
 
     def rrow(lbl, val, cls="val"):
         return (f'<div class="report-row">'
@@ -1294,23 +1286,23 @@ with tab8:
         rrow("MLoS Rows",                  f"{len(mlos_corrected):,}"),
         rrow("Takeoffpoint Rows",          f"{len(takeoff_df):,}"),
         rrow("━" * 36,                     "", "val-div"),
-        rrow("MLoS Checks Run",            str(len(mlos_checks))),
-        rrow("MLoS Checks ✅ Passing",     str(mlos_n_pass),  "val-pass"),
-        rrow("MLoS Checks ❌ Failing",     str(mlos_n_fail),  "val-fail" if mlos_n_fail else "val-pass"),
-        rrow("MLoS Issue Rows",            f"{summary.layers['MLoS'].findings:,}",
-                                            "val-fail" if summary.layers['MLoS'].findings else "val-pass"),
+        rrow("MLoS Checks Run",            str(len(_mlos_l.checks))),
+        rrow("MLoS Checks ✅ Passing",     str(_mlos_l.n_pass),  "val-pass"),
+        rrow("MLoS Checks ❌ Failing",     str(_mlos_l.n_fail),  "val-fail" if _mlos_l.n_fail else "val-pass"),
+        rrow("MLoS Issue Rows",            f"{_mlos_l.findings:,}",
+                                            "val-fail" if _mlos_l.findings else "val-pass"),
         rrow("━" * 36,                     "", "val-div"),
-        rrow("Settlement Checks Run",      str(len(settlement_checks))),
-        rrow("Settlement Checks ✅ Passing", str(sq_n_pass),  "val-pass"),
-        rrow("Settlement Checks ❌ Failing", str(sq_n_fail),  "val-fail" if sq_n_fail else "val-pass"),
-        rrow("Settlement Issue Rows",      f"{summary.layers['Settlement'].findings:,}",
-                                            "val-fail" if summary.layers['Settlement'].findings else "val-pass"),
+        rrow("Settlement Checks Run",      str(len(_sq_l.checks))),
+        rrow("Settlement Checks ✅ Passing", str(_sq_l.n_pass),  "val-pass"),
+        rrow("Settlement Checks ❌ Failing", str(_sq_l.n_fail),  "val-fail" if _sq_l.n_fail else "val-pass"),
+        rrow("Settlement Issue Rows",      f"{_sq_l.findings:,}",
+                                            "val-fail" if _sq_l.findings else "val-pass"),
         rrow("━" * 36,                     "", "val-div"),
-        rrow("Takeoffpoint Checks Run",    str(len(tp_checks))),
-        rrow("Takeoffpoint Checks ✅ Passing", str(tp_n_pass),  "val-pass"),
-        rrow("Takeoffpoint Checks ❌ Failing", str(tp_n_fail),  "val-fail" if tp_n_fail else "val-pass"),
-        rrow("Takeoffpoint Issue Rows",    f"{summary.layers['Takeoffpoint'].findings:,}",
-                                            "val-fail" if summary.layers['Takeoffpoint'].findings else "val-pass"),
+        rrow("Takeoffpoint Checks Run",    str(len(_tp_l.checks))),
+        rrow("Takeoffpoint Checks ✅ Passing", str(_tp_l.n_pass),  "val-pass"),
+        rrow("Takeoffpoint Checks ❌ Failing", str(_tp_l.n_fail),  "val-fail" if _tp_l.n_fail else "val-pass"),
+        rrow("Takeoffpoint Issue Rows",    f"{_tp_l.findings:,}",
+                                            "val-fail" if _tp_l.findings else "val-pass"),
     ])
     st.markdown(f'<div class="report-card">{html}</div>', unsafe_allow_html=True)
 
