@@ -20,7 +20,7 @@ from . import settlement
 from . import takeoff
 from . import boundary
 from . import autocorrect
-from .results import Rule, register, canonical_order
+from .results import Rule, register, canonical_order, get_rule
 
 
 def sort_by_registry(checks: list[dict]) -> list[dict]:

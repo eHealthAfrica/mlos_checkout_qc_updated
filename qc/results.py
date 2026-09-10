@@ -52,3 +52,14 @@ def canonical_order() -> list[str]:
     An empty registry returns an empty list, not ``None``, and this never raises.
     """
     return list(_ORDER)
+
+
+def get_rule(id: str) -> Rule:
+    """Look up a registered Rule by its identifier.
+
+    Raises ``KeyError`` naming the identifier when it was never registered — mirrors
+    ``register()``'s own fail-loud convention.
+    """
+    if id not in _REGISTRY:
+        raise KeyError(f"No rule registered for id {id!r}")
+    return _REGISTRY[id]

@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 
 import qc
 import qc.columns
+import qc.report
 from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
 from qc.loaders import (
     MLOS_VIEW, TAKEOFF_VIEW, load_sqlite, load_view, load_csv, load_xlsx,
@@ -835,6 +836,23 @@ else:
     st.session_state["mlos_corrected"]     = mlos_corrected
     st.session_state["autocorrect_log"]    = autocorrect_log
 
+# ── Shared verdict/score/count computation (VERDICT-05/F1/F6/F8's structural fix) ──────────
+# Built exactly once, immediately after the cache if/else above has resolved both arms to the
+# same five (checks, detail) pairs, and inside neither arm — a value derived on one branch only
+# is F4's shape (RESEARCH.md Pitfall 4). Every presentation site below reads this one object.
+summary = qc.report.build_summary(
+    filename,
+    {
+        "Schema": (schema_checks, schema_detail),
+        "MLoS": (mlos_checks, mlos_detail),
+        "Settlement": (settlement_checks, settlement_detail),
+        "Takeoffpoint": (tp_checks, tp_detail),
+        "Boundary": (boundary_checks, boundary_detail),
+    },
+    mlos_row_count=len(mlos_corrected),
+    takeoff_row_count=len(takeoff_df),
+)
+
 all_checks         = schema_checks + mlos_checks + settlement_checks + tp_checks + boundary_checks
 n_fail             = sum(1 for c in all_checks if "FAIL" in c["Status"])
 n_pass             = len(all_checks) - n_fail
@@ -844,29 +862,6 @@ mlos_fail_rows     = len(mlos_detail)
 settlement_fail_rows = len(settlement_detail)
 tp_fail_rows       = len(tp_detail)
 boundary_fail_rows = len(boundary_detail)
-
-# ── Weighted Score ───────────────────────────────────────────────────────────────
-# Schema 10% | MLoS 40% | Settlement 20% | Takeoffpoint 20% | Boundary 10%
-LAYER_WEIGHTS = {
-    "schema":     0.10,
-    "mlos":       0.40,
-    "settlement": 0.20,
-    "tp":         0.20,
-    "boundary":   0.10,
-}
-
-def _layer_pass_rate(checks):
-    if not checks:
-        return 1.0   # no checks → full credit (layer not applicable)
-    passing = sum(1 for c in checks if "FAIL" not in c["Status"])
-    return passing / len(checks)
-
-schema_score     = _layer_pass_rate(schema_checks)     * LAYER_WEIGHTS["schema"]     * 100
-mlos_score       = _layer_pass_rate(mlos_checks)     * LAYER_WEIGHTS["mlos"]       * 100
-settlement_score = _layer_pass_rate(settlement_checks) * LAYER_WEIGHTS["settlement"] * 100
-tp_score         = _layer_pass_rate(tp_checks)       * LAYER_WEIGHTS["tp"]         * 100
-boundary_score   = _layer_pass_rate(boundary_checks) * LAYER_WEIGHTS["boundary"]   * 100
-weighted_score   = schema_score + mlos_score + settlement_score + tp_score + boundary_score
 
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
 st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_corrected):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")
@@ -878,7 +873,8 @@ c3.metric("✅ Passing",       f"{n_pass}")
 c4.metric("❌ Failing",       f"{n_fail}")
 c5.metric("⚠️ Issue Rows",   f"{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows:,}")
 c6.metric("📈 Pass Rate",     pct_pass)
-c7.metric("🏆 Weighted Score", f"{weighted_score:.1f}%")
+c7.metric("🏆 Weighted Score", f"{summary.weighted_score:.1f}%",
+          help=f"of {summary.achievable_max:.1f}% achievable")
 
 st.markdown("---")
 
@@ -916,23 +912,39 @@ with tab2:
     # ── Weighted Score Breakdown ──────────────────────────────────────────────────
     st.markdown('<div class="sec-title">🏆 Weighted QC Score</div>', unsafe_allow_html=True)
 
-    score_colour = "#15803d" if weighted_score >= 80 else ("#d97706" if weighted_score >= 60 else "#be123c")
+    _SCORE_BAND_COLOUR = {"green": "#15803d", "amber": "#d97706", "red": "#be123c"}
+    score_colour = _SCORE_BAND_COLOUR[summary.score_band]
     st.markdown(
         f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
         f'padding:16px 24px;margin-bottom:16px;">'
-        f'<span style="font-size:2rem;font-weight:800;color:{score_colour}">{weighted_score:.1f}%</span>'
+        f'<span style="font-size:2rem;font-weight:800;color:{score_colour}">{summary.score_display}</span>'
         f'<span style="font-size:0.9rem;color:#64748b;margin-left:12px;">Overall Weighted Score</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
+    # D-02: Layer Pass Rate reads n/a (never a number) for a layer that did not run; Weighted
+    # Contribution is always a number, 0.0% for that same layer; the Weight column is unchanged.
+    # The Total row's contribution carries the achievable-maximum score_display (D-01).
+    _LAYER_LABELS = {
+        "Schema": "🔎 Schema Alignment",
+        "MLoS": "🏘️ MLoS Rules",
+        "Settlement": "📐 Settlement QC",
+        "Takeoffpoint": "📍 Takeoffpoint Rules",
+        "Boundary": "🗺️ Boundary Checks",
+    }
     score_rows = [
-        {"QC Layer": "🔎 Schema Alignment",  "Weight": "10%", "Layer Pass Rate": f"{_layer_pass_rate(schema_checks)*100:.1f}%",     "Weighted Contribution": f"{schema_score:.1f}%"},
-        {"QC Layer": "🏘️ MLoS Rules",        "Weight": "40%", "Layer Pass Rate": f"{_layer_pass_rate(mlos_checks)*100:.1f}%",       "Weighted Contribution": f"{mlos_score:.1f}%"},
-        {"QC Layer": "📐 Settlement QC",      "Weight": "20%", "Layer Pass Rate": f"{_layer_pass_rate(settlement_checks)*100:.1f}%", "Weighted Contribution": f"{settlement_score:.1f}%"},
-        {"QC Layer": "📍 Takeoffpoint Rules", "Weight": "20%", "Layer Pass Rate": f"{_layer_pass_rate(tp_checks)*100:.1f}%",         "Weighted Contribution": f"{tp_score:.1f}%"},
-        {"QC Layer": "🗺️ Boundary Checks",   "Weight": "10%", "Layer Pass Rate": f"{_layer_pass_rate(boundary_checks)*100:.1f}%",   "Weighted Contribution": f"{boundary_score:.1f}%"},
-        {"QC Layer": "🏆 Total",              "Weight": "100%","Layer Pass Rate": "—",                                               "Weighted Contribution": f"{weighted_score:.1f}%"},
+        {
+            "QC Layer": _LAYER_LABELS[_name],
+            "Weight": f"{summary.layers[_name].weight * 100:.0f}%",
+            "Layer Pass Rate": ("n/a" if summary.layers[_name].pass_rate is None
+                                 else f"{summary.layers[_name].pass_rate * 100:.1f}%"),
+            "Weighted Contribution": f"{summary.layers[_name].weighted_contribution:.1f}%",
+        }
+        for _name in qc.report.LAYER_ORDER
+    ] + [
+        {"QC Layer": "🏆 Total", "Weight": "100%", "Layer Pass Rate": "—",
+         "Weighted Contribution": summary.score_display},
     ]
     st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
 
