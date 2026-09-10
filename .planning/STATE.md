@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Verdict and Report Integrity
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-09-10T19:32:29.721Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-09-10T19:54:50.346Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: dd25b73c2662ed3510e536026d87011755730444
+state_head: 9d4904735a04d86d8b4ffdde0cbdf88896c061a4
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
   percent: 14
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 03 (Verdict and Report Integrity) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-10 — Phase 03 execution started
 
@@ -73,6 +73,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 02 P06 | 50 min | 3 tasks | 2 files |
 | Phase 03 P01 | 55min | 3 tasks | 9 files |
 | Phase 03 P02 | 45min | 3 tasks | 5 files |
+| Phase 03 P03 | 15min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -117,6 +118,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-01: Documented discrepancy -- plan's Task 1 acceptance criteria claim "100.0% of 80.0% achievable" for a fully-passing four-layer run; implementation follows D-01's own worked example ("a perfect four-layer file scores 80.0%") instead, since renormalising would reopen F6
 - [Phase 03]: 03-02: Cover verdict cell holds summary.verdict_text verbatim, no glyph prefix -- follows the plan's literal behavior/acceptance criteria (exact-string match) over its action prose
 - [Phase 03]: 03-02: Report workbook reshaped to one combined QC Summary sheet (registry-sourced Layer column, D-07 placeholder rows) plus one detail sheet per layer, replacing the old two-summary-sheet shape
+- [Phase 03]: 03-03: qc.report.build_email_subject_and_body(summary) is a pure email builder (no secrets, no smtplib); send_qc_email reduced to a one-parameter thin SMTP sender — Closes F11/VERDICT-03 -- today's email body had no Settlement layer line at all
+- [Phase 03]: 03-03: Generate Report tab's three-column MLoS/Settlement/Takeoffpoint breakdown replaced with a five-layer metadata card and one combined table built from qc.report.summary_rows(summary) — Screen and downloaded workbook now read the same row builder so they cannot drift apart
 
 ### Pending Todos
 
@@ -143,6 +146,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T19:32:29.673Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-09-10T19:54:50.295Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
