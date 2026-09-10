@@ -174,7 +174,14 @@ Plans:
   4. The emailed summary reports Settlement layer counts alongside the other four layers
   5. Boundary checks appear as B0, B1, B2, B3 in that order in every summary table and export, and raw-data sheets are written without per-cell font or border assignment
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — One shared verdict/score/count computation; no credit for a layer that ran zero checks; distinct-row counting (VERDICT-04, VERDICT-05)
+- [ ] 03-02-PLAN.md — Report workbook: five-layer cover verdict, one combined summary sheet plus a detail sheet per layer, plain-value bulk sheets (VERDICT-01, VERDICT-02, ENGINE-08)
+- [ ] 03-03-PLAN.md — Email: pure subject/body builder, five layer blocks including Settlement, five-layer Generate Report tab (VERDICT-03)
+- [ ] 03-04-PLAN.md — Standing proofs of canonical order and four-site agreement; README §8/§10/§11 rewrite (VERDICT-06)
+
 **UI hint**: yes
 
 **Notes**: F10 ("report row order reproducible across app restarts") shows its symptom in this layer but is **not** closed here — it is closed by ENGINE-09 in Phase 1, where the cause lives. See the Phase 1 notes for the evidence. What this layer inherits is the guarantee: because rule order is already stable by Phase 1, the report and summary tables here can be diffed row-for-row without re-sorting. F10 was one of two defects confirmed by running the described case against pandas 3.0.2.
