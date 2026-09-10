@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Detection Correctness and Three-Format Harness
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-10T10:52:21.030Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-09-10T12:58:51.428Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 02 execution started
-state_head: c99062c0e4540bdcc01d5e43f32f92703f10bc83
+state_head: d69fe62f03540bcb41a943979d5b6c3fd2b3f8a5
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 12
-  completed_plans: 7
+  completed_plans: 8
   percent: 14
 ---
 
@@ -65,6 +65,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 01 P05 | 12min | 3 tasks | 6 files |
 | Phase 01 P06 | 40min | 3 tasks | 7 files |
 | Phase 02 P01 | 42min | 3 tasks | 9 files |
+| Phase 02 P02 | 15min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,7 @@ Recent decisions affecting current work:
 - [Phase 02]: D-05 confirmed as written: uniform absence sentinel list for every column, exact literal NA exempted case-sensitively
 - [Phase 02]: Golden fixture's Takeoffpoint table carries no TAKEOFF_REQUIRED_COLS-named column so R2/R3/R4 stay silent uniformly across all three formats (Plan 02's INTEG-02 scope)
 - [Phase 02]: test_extraction_parity.py rescoped to a baseline-intersection comparison (planner decision 4) so plans 02/03/05 can register new rule identifiers without editing it again
+- [Phase 02]: Phase 02 Plan 02: rebuilt R2/R3/R4 and TP2/TP3/TP4 cross-table match masks to exclude absent source cells and registered six new .missing identifiers, closing INTEG-02 (F9). — A blank source cell must fail its own .missing check and be excluded from the match rule, or D-03's exactly-three-checks invariant breaks into four.
 
 ### Pending Todos
 
@@ -118,6 +120,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T10:52:20.986Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-09-10T12:58:51.390Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None

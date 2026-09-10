@@ -25,7 +25,7 @@ that let a failing file be reported as clean.
 A verdict must not depend on upload format, and a check must not pass because a value is absent.
 
 - [x] **INTEG-01**: Rule 1 flags missing required fields identically whether the submission arrives as `.sqlite`, `.csv` or `.xlsx` — closes F2
-- [ ] **INTEG-02**: A blank value cannot satisfy a cross-table match rule (R2, R3, R4, TP2, TP3, TP4) — closes F9
+- [x] **INTEG-02**: A blank value cannot satisfy a cross-table match rule (R2, R3, R4, TP2, TP3, TP4) — closes F9
 - [ ] **INTEG-03**: Column names are normalised once at load so schema alignment and the rules resolve the same columns; renames are reported to the officer — closes F7
 - [ ] **INTEG-04**: When state-name filtering yields no boundary reference and the check falls back to the full national set, that fallback appears as a visible warning rather than silently widening B1 — closes F13
 
@@ -163,7 +163,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | VERDICT-05 | Phase 3 | Pending |
 | VERDICT-06 | Phase 3 | Pending |
 | INTEG-01 | Phase 2 | Complete |
-| INTEG-02 | Phase 2 | Pending |
+| INTEG-02 | Phase 2 | Complete |
 | INTEG-03 | Phase 2 | Pending |
 | INTEG-04 | Phase 2 | Pending |
 | ENGINE-01 | Phase 1 | Complete |
