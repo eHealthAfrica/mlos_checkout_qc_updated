@@ -12,6 +12,10 @@ from openpyxl.utils import get_column_letter
 
 import qc
 from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
+from qc.loaders import (
+    MLOS_VIEW, TAKEOFF_VIEW, load_sqlite, load_view, load_csv, load_xlsx,
+    load_submission, load_takeoffpoint_file,
+)
 
 # ─── Page Config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -88,111 +92,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ─── Constants ───────────────────────────────────────────────────────────────────
-MLOS_VIEW    = "master_list_settlement_update_view"
-TAKEOFF_VIEW = "mlos_takeoffpoint_view"
+# MLOS_VIEW / TAKEOFF_VIEW relocated to qc/loaders.py (Phase 1 D-08); imported above.
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────────
-def load_sqlite(uploaded_file):
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
-    tmp.write(uploaded_file.read())
-    tmp.close()
-    return sqlite3.connect(tmp.name), tmp.name
-
-def load_view(conn, view_name):
-    cur = conn.cursor()
-    cur.execute(f'PRAGMA table_info("{view_name}")')
-    cols_info = cur.fetchall()
-    safe = [c[1] for c in cols_info
-            if c[2] is None or not any(k in str(c[2]).upper()
-                                       for k in ("BLOB","POINT","GEOMETRY"))]
-    col_str = ", ".join(f'"{c}"' for c in safe)
-    return pd.read_sql_query(f'SELECT {col_str} FROM "{view_name}"', conn)
-
-def load_csv(uploaded_file):
-    """Load a CSV file as the MLoS table. Returns (mlos_df, empty takeoff_df)."""
-    uploaded_file.seek(0)
-    # keep_default_na=False prevents pandas from silently converting the valid
-    # domain value "NA" (used in flag columns like highrisk, slums, etc.) to NaN.
-    # Only truly empty cells remain as NaN.
-    mlos_df = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
-    takeoff_df = pd.DataFrame()
-    return mlos_df, takeoff_df
-
-def load_xlsx(uploaded_file):
-    """Load an XLSX/XLS file. Expects two sheets: mlos (sheet 1) and takeoffpoint (sheet 2).
-    Sheet names may match the view names or simplified aliases."""
-    uploaded_file.seek(0)
-    xl = pd.ExcelFile(uploaded_file)
-    sheet_names = xl.sheet_names
-
-    # Resolve mlos sheet — prefer view name, then 'mlos', then first sheet
-    mlos_aliases = {MLOS_VIEW.lower(), "mlos", "master_list", "settlements"}
-    mlos_sheet = next(
-        (s for s in sheet_names if s.lower() in mlos_aliases),
-        sheet_names[0]
-    )
-
-    # Resolve takeoff sheet — prefer view name, then 'takeoffpoint', then second sheet
-    takeoff_aliases = {TAKEOFF_VIEW.lower(), "takeoffpoint", "takeoff", "takeoff_point"}
-    takeoff_sheet = next(
-        (s for s in sheet_names if s.lower() in takeoff_aliases and s != mlos_sheet),
-        sheet_names[1] if len(sheet_names) > 1 else None
-    )
-
-    # keep_default_na=False prevents pandas from converting the valid domain value
-    # "NA" (used in flag columns) to NaN. Only truly empty cells remain as NaN.
-    mlos_df    = xl.parse(mlos_sheet,   dtype=str, keep_default_na=False)
-    takeoff_df = xl.parse(takeoff_sheet, dtype=str, keep_default_na=False) if takeoff_sheet else pd.DataFrame()
-    return mlos_df, takeoff_df
+# load_sqlite / load_view / load_csv / load_xlsx / load_takeoffpoint_file relocated to
+# qc/loaders.py verbatim (Phase 1 D-08) — imported above. get_uploaded_data below is now only
+# the session-state caching wrapper; all parsing is qc.loaders.load_submission's job.
 
 def get_uploaded_data(uploaded_file, progress=None):
     cache_key = (uploaded_file.name, getattr(uploaded_file, "size", None))
     if st.session_state.get("uploaded_cache_key") == cache_key:
         if progress is not None:
             progress.progress(100)
-        return st.session_state["mlos_df"], st.session_state["takeoff_df"]
+        return st.session_state["mlos_raw"], st.session_state["takeoff_df"]
 
-    if progress is not None:
-        progress.progress(10)
+    def _on_progress(value):
+        if progress is not None:
+            progress.progress(value)
 
-    ext = uploaded_file.name.rsplit(".", 1)[-1].lower()
-
-    if ext in ("xlsx", "xls"):
-        if progress is not None:
-            progress.progress(35)
-        mlos_df, takeoff_df = load_xlsx(uploaded_file)
-        if progress is not None:
-            progress.progress(90)
-    elif ext == "csv":
-        if progress is not None:
-            progress.progress(35)
-        mlos_df, takeoff_df = load_csv(uploaded_file)
-        if progress is not None:
-            progress.progress(90)
-    else:
-        conn, tmp_path = load_sqlite(uploaded_file)
-        try:
-            if progress is not None:
-                progress.progress(35)
-            mlos_df    = load_view(conn, MLOS_VIEW)
-            if progress is not None:
-                progress.progress(65)
-            takeoff_df = load_view(conn, TAKEOFF_VIEW)
-            if progress is not None:
-                progress.progress(90)
-        finally:
-            conn.close()
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+    mlos_raw, takeoff_df = load_submission(
+        uploaded_file, uploaded_file.name, on_progress=_on_progress
+    )
 
     st.session_state["uploaded_cache_key"] = cache_key
-    st.session_state["mlos_df"] = mlos_df
+    st.session_state["mlos_raw"] = mlos_raw
     st.session_state["takeoff_df"] = takeoff_df
     if progress is not None:
         progress.progress(100)
-    return mlos_df, takeoff_df
+    return mlos_raw, takeoff_df
 
 
 # ─── Schema QC ───────────────────────────────────────────────────────────────────
@@ -517,19 +444,7 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
 
 
 # ─── Takeoffpoint File Loader ────────────────────────────────────────────────────
-def load_takeoffpoint_file(tp_file) -> pd.DataFrame:
-    """Parse a separately uploaded takeoffpoint CSV or Excel file."""
-    ext = tp_file.name.rsplit(".", 1)[-1].lower()
-    tp_file.seek(0)
-    if ext == "csv":
-        return pd.read_csv(tp_file, dtype=str, keep_default_na=False)
-    xl = pd.ExcelFile(tp_file)
-    tp_aliases = {TAKEOFF_VIEW.lower(), "takeoffpoint", "takeoff", "takeoff_point"}
-    tp_sheet = next(
-        (s for s in xl.sheet_names if s.lower() in tp_aliases),
-        xl.sheet_names[0],
-    )
-    return xl.parse(tp_sheet, dtype=str, keep_default_na=False)
+# load_takeoffpoint_file relocated to qc/loaders.py verbatim (Phase 1 D-08); imported above.
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
