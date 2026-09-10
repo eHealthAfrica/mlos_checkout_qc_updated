@@ -177,9 +177,20 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 03-01-PLAN.md — One shared verdict/score/count computation; no credit for a layer that ran zero checks; distinct-row counting (VERDICT-04, VERDICT-05)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-02-PLAN.md — Report workbook: five-layer cover verdict, one combined summary sheet plus a detail sheet per layer, plain-value bulk sheets (VERDICT-01, VERDICT-02, ENGINE-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-03-PLAN.md — Email: pure subject/body builder, five layer blocks including Settlement, five-layer Generate Report tab (VERDICT-03)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 03-04-PLAN.md — Standing proofs of canonical order and four-site agreement; README §8/§10/§11 rewrite (VERDICT-06)
 
 **UI hint**: yes
