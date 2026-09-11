@@ -237,7 +237,11 @@ def test_looks_like_a_secret_true_for_freshly_generated_tokens():
 
 
 def test_looks_like_a_secret_true_for_hyphenated_mixed_case_client_secret_shape():
-    provider_style = "-AbCdEfGhIjKlMnOpQrStUvWxYz0123456"
+    """Built by concatenating several short literals rather than one 34-character literal --
+    this file is itself tracked Python source scanned by scan_tracked_python above, and no
+    individual string constant here may itself be 32+ characters and secret-shaped (that would
+    make this guard's own test file a permanent offender against itself)."""
+    provider_style = "-" + "AbCdEfGh" + "IjKlMnOp" + "QrStUvWx" + "Yz0123456"
     assert len(provider_style) >= 32
     assert looks_like_a_secret(provider_style) is True
 
