@@ -1,3 +1,15 @@
+---
+title: MLOS Checkout QC
+emoji: 🗺️
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+python_version: "3.11"
+app_file: app.py
+pinned: false
+short_description: Automated QC checks for Master List of Settlements checkout files
+---
+
 # MLOS Checkout QC
 
 A Streamlit app for running automated Quality Control (QC) checks on MLOS (Master List of Settlements) checkout files across **5 QC layers**: schema alignment, MLoS data integrity, settlement spatial checks, takeoffpoint cross-checks, and admin boundary validation.
