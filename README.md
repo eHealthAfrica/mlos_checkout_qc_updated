@@ -333,23 +333,31 @@ The detail and raw-data sheets are written as plain values with a styled header 
 
 Click **Send QC Email** in the Generate Report tab to notify the data team.
 
+The primary and copy recipients are read from the `SMTP_TO` and `SMTP_CC` Space secrets —
+[recipient address removed - DEPLOY-02] no address is committed in this repository, and both
+lists are editable in the Space UI without a deploy. Send is disabled, with a visible reason
+next to the button, while `SMTP_TO` is unset or empty.
+
 | Field | Value |
 |-------|-------|
-| **To** | adanna.alex@ehealthnigeria.org |
-| **CC** | fashoto.busayo@ehealthnigeria.org, victor.idakwo@ehealthnigeria.org, oluwadamilare.akindipe@ehealthnigeria.org |
 | **Subject** | Carries the verdict: `MLoS QC: FAILING (12 checks) — kano_checkout.xlsx` or `MLoS QC: CLEAN — kano_checkout.xlsx` |
 | **Body** | Plain text: the verdict sentence; the weighted score with its achievable maximum; the headline issue-rows figure; one block per layer (in canonical order) with checks run, checks failing and its issue-rows line — or `not run: no Takeoffpoint data supplied` for a layer that did not run; the existing missing-columns block; then a check-by-check list grouped under layer headings, in rule order |
 
 A clean email still lists **every check that ran**, passing and failing, so the reader can see exactly what was verified. The renamed-columns report (§2) is not part of the email — it stays in the on-screen expander and the report's Columns Renamed sheet only.
 
-SMTP credentials must be configured in Streamlit secrets:
+Recipients and SMTP credentials are configured as Space secrets — see the Deployment section
+below for the full list (rewritten for Hugging Face Spaces). On a local
+`.streamlit/secrets.toml` (dev only), the same SMTP credential keys apply:
 
 ```toml
 smtp_host = "smtp.office365.com"   # or smtp.gmail.com for Gmail
 smtp_port = 587
-smtp_user = "your@email.com"
+smtp_user = "<smtp-account-user>"
 smtp_pass = "your-app-password"
 ```
+
+On Hugging Face Spaces these keys — plus `SMTP_TO`/`SMTP_CC` — arrive as flat environment
+variables, not a TOML file the officer edits.
 
 > `smtp_host` must be the mail server hostname — **not** an email address.
 

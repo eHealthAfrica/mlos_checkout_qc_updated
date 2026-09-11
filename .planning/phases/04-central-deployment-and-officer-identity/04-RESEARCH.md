@@ -419,7 +419,7 @@ on the production URL is the tell — it should never be seen there.
 | Category | Items Found | Action Required |
 |----------|-------------|------------------|
 | Stored data | None found — this phase creates no new persisted data (the submission log is Phase 5/AUDIT-*, explicitly out of this phase's scope per CONTEXT.md `<domain>`) | none |
-| Live service config | The four committed organisational email addresses at `app.py:286-289` [VERIFIED: app.py:286-289 — `TO  = ["adanna.alex@ehealthnigeria.org"]` / `CC  = ["fashoto.busayo@ehealthnigeria.org", "victor.idakwo@ehealthnigeria.org", "oluwadamilare.akindipe@ehealthnigeria.org"]`] are the one piece of "config committed where it shouldn't be" this phase inherits — REQUIREMENTS.md's `app.py:644-647` citation is stale; line numbers moved after Phase 3's refactor. Both a code edit (DEPLOY-02, remove the literals) and a history migration (DEPLOY-03, `git filter-repo`) are required — they are separate tasks per D-08 | code edit + history rewrite |
+| Live service config | The four committed organisational email addresses at `app.py:286-289` [VERIFIED: app.py:286-289 — `TO  = ["[recipient address removed - DEPLOY-02]"]` / `CC  = ["[recipient address removed - DEPLOY-02]", "[recipient address removed - DEPLOY-02]", "[recipient address removed - DEPLOY-02]"]`] are the one piece of "config committed where it shouldn't be" this phase inherits — REQUIREMENTS.md's `app.py:644-647` citation is stale; line numbers moved after Phase 3's refactor. Both a code edit (DEPLOY-02, remove the literals — done, plan 04-02 Task 1) and a history migration (DEPLOY-03, `git filter-repo`) are required — they are separate tasks per D-08 | code edit (done) + history rewrite |
 | OS-registered state | None — no OS-level task scheduler, pm2, launchd, or systemd registration exists anywhere in this codebase (single Streamlit process, run via `streamlit run app.py` or the HF Space's own supervisor) | none |
 | Secrets/env vars | New secrets this phase introduces on the Space: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `COOKIE_SECRET`, `REDIRECT_URI` (or equivalent names — planner's choice), `SMTP_TO`, `SMTP_CC`, plus the existing `smtp_host`/`smtp_port`/`smtp_user`/`smtp_pass` which stay as-is (D-07). None of these currently exist in the working tree or history — they are populated only by the human at the D-02 checkpoint | code reads new secret names; no existing secret is renamed |
 | Build artifacts | None — no compiled/installed artifact in this repo carries the addresses or old auth-related names; `requirements.txt`'s version floor bump (`streamlit>=1.32.0` → `>=1.42.0`) is a declaration change, not a stale artifact | reinstall after `requirements.txt` bump (`pip install -r requirements.txt`) |
@@ -465,12 +465,18 @@ against a live HF Space this session — add to the Assumptions Log.
 # 1. Notify collaborators; confirm no unpushed work anywhere (blocking-human checklist item)
 brew install git-filter-repo   # macOS
 
-# 2. Build the replacement-expressions file (one literal per line -> redacted)
+# 2. Build the replacement-expressions file (one literal per line -> redacted).
+#    [recipient address removed - DEPLOY-02]: the four exact address literals are NOT
+#    transcribed into any tracked file (this one included) -- plan 04-06's preparation task
+#    derives them from git history at run time (e.g. `git log -p` over the pre-04-02 commits
+#    that introduced app.py's TO/CC literals), so this guide's own text cannot become the
+#    thing DEPLOY-03's standing scan (tests/test_no_committed_secrets.py, plan 04-02 Task 2)
+#    would have to exempt.
 cat > /tmp/addresses.txt <<'EOF'
-adanna.alex@ehealthnigeria.org==>REDACTED
-fashoto.busayo@ehealthnigeria.org==>REDACTED
-victor.idakwo@ehealthnigeria.org==>REDACTED
-oluwadamilare.akindipe@ehealthnigeria.org==>REDACTED
+<address-1>==>REDACTED
+<address-2>==>REDACTED
+<address-3>==>REDACTED
+<address-4>==>REDACTED
 EOF
 
 # 3. Run from a FRESH clone (filter-repo refuses to run on a repo with an existing remote
@@ -480,7 +486,7 @@ cd scrub-clone
 git filter-repo --replace-text /tmp/addresses.txt
 
 # 4. Verify BEFORE force-pushing -- across all refs, not just HEAD
-git log --all -S 'adanna.alex@ehealthnigeria.org' --oneline   # expect: no output
+git log --all -S '<address-1>' --oneline   # expect: no output (repeat per address)
 git grep -I 'ehealthnigeria.org' $(git rev-list --all) 2>/dev/null | grep -v REDACTED  # expect: no output
 
 # 5. Force-push all branches and tags (blocking-human -- see checklist below)
@@ -492,7 +498,9 @@ git push origin --force --tags
 **DEPLOY-03 blocking-human checklist (per D-08):**
 1. Confirm `feature/qc-rules` has merged to `main` (do not rewrite before merge).
 2. Notify all collaborators; confirm nobody has unpushed local work.
-3. Run `git filter-repo --replace-text` with the exact four literals above, on a fresh clone.
+3. Run `git filter-repo --replace-text` with the exact four literals (derived from git history
+   at run time, per the note above — not transcribed into this or any other tracked file), on a
+   fresh clone.
 4. Verify with `git log --all -S '<address>'` for each of the four addresses — expect zero
    hits — and a full-history `git grep` sweep.
 5. Force-push all branches and tags to `eha` (`github.com/eHealthAfrica/mlos_checkout_qc.git`).
