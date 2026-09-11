@@ -18,6 +18,10 @@ from qc.loaders import (
     MLOS_VIEW, TAKEOFF_VIEW, load_sqlite, load_view, load_csv, load_xlsx,
     load_submission, load_takeoffpoint_file,
 )
+import auth
+
+# ─── Auth Secrets ────────────────────────────────────────────────────────────────
+auth.materialize_auth_secrets()
 
 # ─── Page Config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -326,6 +330,9 @@ def build_corrected_excel(df: pd.DataFrame) -> bytes:
 
 # ─── Takeoffpoint File Loader ────────────────────────────────────────────────────
 # load_takeoffpoint_file relocated to qc/loaders.py verbatim (Phase 1 D-08); imported above.
+
+# ─── Auth Gate ───────────────────────────────────────────────────────────────────
+officer = auth.require_login()
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
