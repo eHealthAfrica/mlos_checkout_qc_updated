@@ -46,7 +46,7 @@ Rule identity, state handling and the structural seam the new layers will be bui
 ### Deployment (M2)
 
 - [ ] **DEPLOY-01**: The app runs as a single private Hugging Face Space that officers in every state reach at one URL
-- [ ] **DEPLOY-02**: SMTP credentials and the email recipient list are read from Space secrets and appear nowhere in the repository
+- [x] **DEPLOY-02**: SMTP credentials and the email recipient list are read from Space secrets and appear nowhere in the repository
 - [ ] **DEPLOY-03**: Organisational email addresses currently committed at `app.py:644-647` are removed from git history, not only from the working tree
 - [ ] **DEPLOY-04**: Officers are given the direct `*.hf.space` URL rather than the `huggingface.co/spaces/...` embed, so login cookies are not blocked by the iframe
 
@@ -176,7 +176,7 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | ENGINE-08 | Phase 3 | Complete |
 | ENGINE-09 | Phase 1 | Complete |
 | DEPLOY-01 | Phase 4 | Pending |
-| DEPLOY-02 | Phase 4 | Pending |
+| DEPLOY-02 | Phase 4 | Complete |
 | DEPLOY-03 | Phase 4 | Pending |
 | DEPLOY-04 | Phase 4 | Pending |
 | AUTH-01 | Phase 4 | Complete |
