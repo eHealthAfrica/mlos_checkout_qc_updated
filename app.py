@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 
 import qc
 import qc.columns
+import qc.mail_config
 import qc.report
 from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
 from qc.loaders import (
@@ -275,41 +276,61 @@ def load_boundary_refs():
     return ref_df, bbox_df
 
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
-def send_qc_email(summary):
-    """Send QC summary email using SMTP credentials stored in st.secrets.
+def get_recipients():
+    """Read SMTP_TO/SMTP_CC through auth.secret (env-first; DEPLOY-02/D-07) and return
+    (to_list, cc_list, reason). ``reason`` is ``None`` when Send may proceed, else the sentence
+    ``qc.mail_config.recipients_disabled_reason`` returns, naming SMTP_TO.
 
-    Thin sender only (03-03 Task 1): the subject and body are built by ``qc.report``'s pure
-    ``build_email_subject_and_body`` function, which reads only the shared summary object.
-    Recipients stay hard-coded here exactly as before -- moving them to Space secrets is
-    DEPLOY-03 in Phase 4, out of this phase's scope.
+    Reads through ``auth.secret`` rather than ``st.secrets`` directly, because Hugging Face
+    Spaces injects flat environment variables that ``st.secrets`` does not see (RESEARCH
+    assumption A2) -- a plain ``st.secrets`` read would report the recipients as unset on the
+    deployed Space even after the human sets them correctly, which is a silent production
+    failure with no obvious cause.
+    """
+    to_raw = auth.secret("SMTP_TO")
+    cc_raw = auth.secret("SMTP_CC")
+    to_list, cc_list = qc.mail_config.split_recipients(to_raw, cc_raw)
+    reason = qc.mail_config.recipients_disabled_reason(to_list)
+    return to_list, cc_list, reason
+
+
+def send_qc_email(summary):
+    """Send QC summary email using recipients and SMTP credentials read from Space secrets via
+    auth.secret (DEPLOY-02/D-07).
+
+    Thin sender only (03-03 Task 1, continued by 04-02 Task 1): the subject and body are built by
+    ``qc.report``'s pure ``build_email_subject_and_body`` function, which reads only the shared
+    summary object; this function's own job is resolving recipients/credentials and doing the
+    SMTP transport. Recipients are no longer hard-coded here -- an unset or empty SMTP_TO raises
+    before any ``smtplib.SMTP`` construction, so this function refuses to send to nobody even
+    when called directly, outside the Send button's own disabled state (T-04-13).
     """
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    TO  = ["adanna.alex@ehealthnigeria.org"]
-    CC  = ["fashoto.busayo@ehealthnigeria.org",
-           "victor.idakwo@ehealthnigeria.org",
-           "oluwadamilare.akindipe@ehealthnigeria.org"]
+    to_list, cc_list, reason = get_recipients()
+    if reason:
+        raise RuntimeError(reason)
 
     subject, body = qc.report.build_email_subject_and_body(summary)
 
+    smtp_user = auth.secret("smtp_user")
+    smtp_host = auth.secret("smtp_host", "smtp.gmail.com")
+    smtp_port = int(auth.secret("smtp_port", 587))
+    smtp_pass = auth.secret("smtp_pass")
+
     msg = MIMEMultipart()
-    msg["From"]    = st.secrets.get("smtp_user", "")
-    msg["To"]      = ", ".join(TO)
-    msg["Cc"]      = ", ".join(CC)
+    msg["From"]    = smtp_user
+    msg["To"]      = ", ".join(to_list)
+    msg["Cc"]      = ", ".join(cc_list)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
-
-    smtp_host = st.secrets.get("smtp_host", "smtp.gmail.com")
-    smtp_port = int(st.secrets.get("smtp_port", 587))
-    smtp_user = st.secrets.get("smtp_user", "")
-    smtp_pass = st.secrets.get("smtp_pass", "")
 
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.starttls()
         server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, TO + CC, msg.as_string())
+        server.sendmail(smtp_user, to_list + cc_list, msg.as_string())
 
 def build_corrected_excel(df: pd.DataFrame) -> bytes:
     """Write the corrected MLoS DataFrame to an Excel file and return bytes."""
@@ -1170,12 +1191,18 @@ with tab8:
 
     st.markdown("---")
     st.markdown("**📧 Send QC Summary by Email**")
-    st.caption("Sends the QC summary to the data team. SMTP credentials must be configured in Streamlit secrets.")
-    if st.button("📤 Send QC Email", type="primary", key="send_email_btn"):
+    _to_list, _cc_list, _recipients_reason = get_recipients()
+    st.caption("Sends the QC summary to the data team. Recipients (`SMTP_TO`, `SMTP_CC`) and "
+               "SMTP credentials (`smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`) are "
+               "configured as Space secrets.")
+    if _recipients_reason:
+        st.warning(_recipients_reason)
+    if st.button("📤 Send QC Email", type="primary", key="send_email_btn",
+                 disabled=bool(_recipients_reason)):
         try:
             send_qc_email(summary)
             st.success("✅ Email sent successfully to the data team.")
         except Exception as e:
             st.error(f"❌ Failed to send email: {e}"
-                     "\n\nEnsure `smtp_host`, `smtp_port`, `smtp_user`, and `smtp_pass` "
-                     "are set in your Streamlit secrets.")
+                     "\n\nEnsure `SMTP_TO`, `smtp_host`, `smtp_port`, `smtp_user`, and "
+                     "`smtp_pass` are set in the Space's secrets.")
