@@ -72,6 +72,37 @@ def test_numpy_is_declared_with_both_bounds():
     assert numpy.__version__, "numpy did not report a __version__ after import"
 
 
+def test_streamlit_floor_supports_the_login_api():
+    """The streamlit line must declare both a >=1.42.0 lower bound (where st.login/st.user were
+    introduced, AUTH-01/D-01) and the existing <2.0.0 upper bound -- a bare version-ordering
+    comparison could be fooled by string sort order, so this asserts the exact substrings."""
+    lines = _read_requirement_lines()
+    streamlit_lines = [
+        line for line in lines
+        if line.split(">")[0].split("<")[0].split("=")[0].split("[")[0] == "streamlit"
+    ]
+    assert streamlit_lines, "requirements.txt does not declare a streamlit dependency at all"
+    assert len(streamlit_lines) == 1, f"expected exactly one streamlit line, found: {streamlit_lines}"
+    streamlit_line = streamlit_lines[0]
+    assert ">=1.42.0" in streamlit_line, (
+        f"streamlit line {streamlit_line!r} is missing the '>=1.42.0' lower bound st.login/st.user need"
+    )
+    assert "<2.0.0" in streamlit_line, f"streamlit line {streamlit_line!r} is missing the '<2.0.0' upper bound"
+
+
+def test_authlib_is_declared_with_both_bounds():
+    """Authlib is the OIDC client streamlit[auth] pulls in for st.login (AUTH-01/D-01) and must
+    carry both bounds, matching test_every_runtime_dependency_is_bounded's requirement that no
+    dependency line may drift into an untested major version silently."""
+    lines = _read_requirement_lines()
+    authlib_lines = [line for line in lines if line.split(">")[0].split("<")[0].split("=")[0] == "Authlib"]
+    assert authlib_lines, "requirements.txt does not declare an Authlib dependency at all"
+    assert len(authlib_lines) == 1, f"expected exactly one Authlib line, found: {authlib_lines}"
+    authlib_line = authlib_lines[0]
+    assert ">=1.3.2" in authlib_line, f"Authlib line {authlib_line!r} is missing the '>=1.3.2' lower bound"
+    assert "<2.0.0" in authlib_line, f"Authlib line {authlib_line!r} is missing the '<2.0.0' upper bound"
+
+
 def test_every_runtime_dependency_is_bounded():
     """Every non-comment, non-empty line of requirements.txt must declare either an exact pin
     (``==``) or an explicit upper bound (``<``) — no dependency may drift into a new major
