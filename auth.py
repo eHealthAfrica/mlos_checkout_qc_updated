@@ -86,6 +86,40 @@ def render_signin_screen():
     st.button("Sign in with Google", on_click=st.login)
 
 
+def render_refusal_page(domain):
+    """D-05/D-09: an authenticated, out-of-domain visitor. Renders no uploader, no tabs and no
+    reference tables — only a refusal statement, the data-team contact (read from the secrets
+    surface, never a literal address in source), and a sign-out control."""
+    st.header("Access not authorised")
+    email = ""
+    try:
+        email = getattr(st.user, "email", "") or ""
+    except Exception:
+        email = ""
+    st.write(
+        f"The signed-in account{f' ({email})' if email else ''} is not authorised for this "
+        f"tool. Sign-in is restricted to the {auth_domain.ALLOWED_DOMAIN} organisational "
+        "Google Workspace."
+    )
+    contact = secret(CONTACT_ENV_VAR)
+    if contact:
+        st.write(f"Contact the data team at {contact} for access.")
+    else:
+        st.write("Contact the data team for access.")
+    st.button("Sign out", on_click=st.logout)
+
+
+def render_bypass_banner():
+    """D-03/T-04-03: visible only when configuration is absent AND the opt-out flag is set.
+    Must be unmissable — RESEARCH Pitfall 4 makes this banner's visibility on a deployed Space
+    the tell that the flag was left set there, where it must never be seen."""
+    st.warning(
+        f"Authentication is DISABLED for this session because {BYPASS_ENV_VAR} is set. This "
+        f"must never be set on the deployed Space — {BYPASS_ENV_VAR} is a local/dev opt-out "
+        "only."
+    )
+
+
 # ─── Gate ───────────────────────────────────────────────────────────────────────
 def require_login():
     """Resolve the visitor into exactly one of the five ``qc.auth_domain.OUTCOMES`` and render
@@ -119,18 +153,21 @@ def require_login():
         return current_officer()
 
     if decision.outcome == "bypass":
-        # Task 2 replaces this inline placeholder with render_bypass_banner().
-        st.warning(f"Authentication disabled ({BYPASS_ENV_VAR} is set) — placeholder banner.")
+        render_bypass_banner()
         return None
 
     if decision.outcome == "unconfigured":
-        # Task 2 replaces this inline placeholder with the full missing-variables message.
-        st.error("Sign-in is not configured — placeholder message.")
+        missing = secrets_materializer.missing_auth_env_keys(os.environ)
+        st.error(
+            "This tool cannot run without sign-in configuration. Missing environment "
+            f"variable(s): {', '.join(missing)}. Set {BYPASS_ENV_VAR} to enable an "
+            "unauthenticated local/dev session explicitly — this must never be set on the "
+            "deployed Space."
+        )
     elif decision.outcome == "signin":
         render_signin_screen()
     elif decision.outcome == "refused":
-        # Task 2 replaces this inline placeholder with render_refusal_page(domain).
-        st.error("Access not authorised — placeholder message.")
+        render_refusal_page(domain)
 
     st.stop()
 
