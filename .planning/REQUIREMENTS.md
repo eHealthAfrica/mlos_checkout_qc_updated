@@ -52,8 +52,8 @@ Rule identity, state handling and the structural seam the new layers will be bui
 
 ### Authentication (M2)
 
-- [ ] **AUTH-01**: An officer must sign in before running a QC check
-- [ ] **AUTH-02**: The application stores no passwords; identity is supplied entirely by the OIDC provider
+- [x] **AUTH-01**: An officer must sign in before running a QC check
+- [x] **AUTH-02**: The application stores no passwords; identity is supplied entirely by the OIDC provider
 - [ ] **AUTH-03**: Login is verified against the deployed Space URL, not only localhost, before M2 is called done
 
 ### Submission Record (M2)
@@ -179,8 +179,8 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | DEPLOY-02 | Phase 4 | Pending |
 | DEPLOY-03 | Phase 4 | Pending |
 | DEPLOY-04 | Phase 4 | Pending |
-| AUTH-01 | Phase 4 | Pending |
-| AUTH-02 | Phase 4 | Pending |
+| AUTH-01 | Phase 4 | Complete |
+| AUTH-02 | Phase 4 | Complete |
 | AUTH-03 | Phase 4 | Pending |
 | AUDIT-01 | Phase 5 | Pending |
 | AUDIT-02 | Phase 5 | Pending |

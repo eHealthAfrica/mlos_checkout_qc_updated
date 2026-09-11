@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Central Deployment and Officer Identity
 status: executing
-stopped_at: Phase 03 complete, ready to plan Phase 04
-last_updated: "2026-09-11T01:31:33.685Z"
-last_activity: 2026-09-10
-last_activity_desc: Phase 03 complete, transitioned to Phase 04
-state_head: 89755cb009d630ec1999a6debaecd1ed690608e3
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-09-11T15:59:31.920Z"
+last_activity: 2026-09-11
+last_activity_desc: Phase 04 execution started
+state_head: 6d5170de4a84e912358e8e61311a6f8cb22e2854
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 1
   total_plans: 22
-  completed_plans: 16
-  percent: 29
+  completed_plans: 17
+  percent: 14
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** A file this tool calls clean is clean.
-**Current focus:** Phase 04 — Central Deployment and Officer Identity (context gathered; planning in progress)
+**Current focus:** Phase 04 — Central Deployment and Officer Identity
 
 ## Current Position
 
-Phase: 04 (Central Deployment and Officer Identity) — READY TO EXECUTE
-Plan: Not started
+Phase: 04 (Central Deployment and Officer Identity) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-09-10 — Phase 03 complete, transitioned to Phase 04
+Last activity: 2026-09-11 — Phase 04 execution started
 
-Progress: [███░░░░░░░] 29%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -76,6 +76,7 @@ Progress: [███░░░░░░░] 29%
 | Phase 03 P02 | 45min | 3 tasks | 5 files |
 | Phase 03 P03 | 15min | 3 tasks | 3 files |
 | Phase 03 P04 | 55min | 3 tasks | 6 files |
+| Phase 04 P01 | 46min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,7 @@ Recent decisions affecting current work:
 - [Phase 03]: [Phase 03] 03-04: Standing proof of canonical rule order at all four ordered outputs (summary object, summary_rows, workbook QC Summary sheet, email check list), read from qc.canonical_order() at test time, never a literal identifier list -- closes VERDICT-06/F14
 - [Phase 03]: [Phase 03] 03-04: Standing proof that the verdict sentence/score/headline are character-identical at the workbook cover and email body, and every registry layer appears at every presentation site (assumption-delta companion invariant); found and fixed two real offenders app.py's own local FAIL-counting and a per-layer-name-keyed label dict, both relocated to qc/report.py
 - [Phase 03]: [Phase 03] 03-04: README.md sections 8, 10, 11 rewritten to match D-01 to D-16's shipped scoring/report/email behaviour; no remaining claim that a skipped layer scores as though it passed
+- [Phase 04]: [Phase 04] 04-01: Google login gate wired end-to-end -- qc.secrets_materializer + qc.auth_domain (pure) feed auth.py's require_login(), which gates app.py's sidebar/uploader before the CSS block; two documented discrepancies from the plan's literal wording recorded in WINDOWS.md (golden fixture's row-less Takeoffpoint table; a second pre-existing write-mode file, tests/baseline/capture_baseline.py).
 
 ### Pending Todos
 
@@ -150,6 +152,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:04:32.863Z
-Stopped at: Phase 03 complete, ready to plan Phase 04
-Resume file: .planning/phases/04-central-deployment-and-officer-identity/04-CONTEXT.md
+Last session: 2026-09-11T15:59:31.862Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None

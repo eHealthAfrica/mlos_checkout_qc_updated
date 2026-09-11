@@ -209,12 +209,12 @@ Plans:
   3. Sign-in is verified working against the deployed Space URL, not only localhost
   4. SMTP credentials and the recipient list are read from Space secrets, appear nowhere in the working tree, and the addresses previously committed at `app.py:644-647` are absent from full git history
 
-**Plans**: 6 plans in 6 waves
+**Plans**: 1/6 plans executed in 6 waves
 
 Plans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Google Workspace login gate end to end: flat env vars rendered into a nested `[auth]` table before any Streamlit call, five-outcome access decision, gate ahead of the uploader and the sidebar, plus password- and upload-persistence guards (AUTH-01, AUTH-02)
+- [x] 04-01-PLAN.md — Google Workspace login gate end to end: flat env vars rendered into a nested `[auth]` table before any Streamlit call, five-outcome access decision, gate ahead of the uploader and the sidebar, plus password- and upload-persistence guards (AUTH-01, AUTH-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -300,7 +300,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
 | 2. Detection Correctness and Three-Format Harness | 6/6 | Complete    | 2026-09-10 |
 | 3. Verdict and Report Integrity | 4/4 | Complete    | 2026-09-10 |
-| 4. Central Deployment and Officer Identity | 0/TBD | Not started | - |
+| 4. Central Deployment and Officer Identity | 1/6 | In Progress|  |
 | 5. Submission Record | 0/TBD | Not started | - |
 | 6. Threshold Configuration and Advisory Severity | 0/TBD | Not started | - |
 | 7. Geometry, Population and Coverage Layers | 0/TBD | Not started | - |
