@@ -209,7 +209,32 @@ Plans:
   3. Sign-in is verified working against the deployed Space URL, not only localhost
   4. SMTP credentials and the recipient list are read from Space secrets, appear nowhere in the working tree, and the addresses previously committed at `app.py:644-647` are absent from full git history
 
-**Plans**: TBD
+**Plans**: 6 plans in 6 waves
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Google Workspace login gate end to end: flat env vars rendered into a nested `[auth]` table before any Streamlit call, five-outcome access decision, gate ahead of the uploader and the sidebar, plus password- and upload-persistence guards (AUTH-01, AUTH-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — SMTP recipients from `SMTP_TO`/`SMTP_CC` Space secrets with Send disabled and a stated reason when unset; every organisational address cleared from the working tree; repository-wide standing scan installed (DEPLOY-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-03-PLAN.md — Hugging Face Space front matter, README §Deployment rewritten for Spaces and the direct `*.hf.space` address, and the D-09 public-Space wording corrected across REQUIREMENTS, ROADMAP, PROJECT and CLAUDE.md (DEPLOY-01, DEPLOY-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-04-PLAN.md — Deploy the public Space and verify officer sign-in: reachability/leak probe, blocking-human Space-and-OAuth setup checkpoint, and the live sign-in checklist (DEPLOY-01, DEPLOY-04, AUTH-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-05-PLAN.md — All-refs history verifier with a recorded non-zero baseline, and the blocking-human data-governance sign-off gating real settlement data (DEPLOY-01, DEPLOY-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 04-06-PLAN.md — One-time history rewrite behind the D-08 checklist, with the address list derived from history rather than transcribed, and an all-refs verification against the baseline (DEPLOY-03)
 
 **Notes**: **Open items blocking this phase** — (a) *OIDC provider choice*: native Hugging Face OAuth (`hf_oauth: true`) or an external IdP. Research recommends HF native, since `st.login` needs a nested `[auth]` TOML block that flat Space environment variables cannot supply (Streamlit issue #10543). Both integrate identically at the `auth.py` boundary, so this does not block architecture — but it must be answered before AUTH-01/AUTH-02 are planned. (b) *Data-governance sign-off* for hosting settlement coordinates and population figures on a third-party free tier — a named decision, not a technical one, required before DEPLOY-01 rollout. Do not invent either answer. Treat DEPLOY-03 (history scrub) as separately scoped from DEPLOY-02 (moving current secrets); "removed from the working tree" is not "removed from history".
 
