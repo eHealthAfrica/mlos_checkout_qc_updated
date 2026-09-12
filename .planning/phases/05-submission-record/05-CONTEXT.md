@@ -121,7 +121,7 @@ Requirements closed: AUDIT-01, AUDIT-02, AUDIT-03, AUDIT-04, AUDIT-05.
 
 ### Claude's Discretion
 
-- **D-16 (append-only guard, AUDIT-04).** The application must offer no path to edit or delete a
+- **D-16:** Append-only guard (AUDIT-04) — the application must offer no path to edit or delete a
   record. Strongly recommended: the uploader is create-only with unique names, and a standing
   AST test in the Phases 1 to 4 idiom asserts that tracked application source contains no call
   that deletes or overwrites repo content (`delete_file`, `delete_folder`, `delete_repo`, delete
