@@ -209,7 +209,7 @@ Plans:
   3. Sign-in is verified working against the deployed Space URL, not only localhost
   4. SMTP credentials and the recipient list are read from Space secrets, appear nowhere in the working tree, and the addresses previously committed at `app.py:644-647` are absent from full git history
 
-**Plans**: 1/6 plans executed in 6 waves
+**Plans**: 3/6 plans executed in 6 waves
 
 Plans:
 **Wave 1**
@@ -218,11 +218,11 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md — SMTP recipients from `SMTP_TO`/`SMTP_CC` Space secrets with Send disabled and a stated reason when unset; every organisational address cleared from the working tree; repository-wide standing scan installed (DEPLOY-02)
+- [x] 04-02-PLAN.md — SMTP recipients from `SMTP_TO`/`SMTP_CC` Space secrets with Send disabled and a stated reason when unset; every organisational address cleared from the working tree; repository-wide standing scan installed (DEPLOY-02)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-03-PLAN.md — Hugging Face Space front matter, README §Deployment rewritten for Spaces and the direct `*.hf.space` address, and the D-09 public-Space wording corrected across REQUIREMENTS, ROADMAP, PROJECT and CLAUDE.md (DEPLOY-01, DEPLOY-04)
+- [x] 04-03-PLAN.md — Hugging Face Space front matter, README §Deployment rewritten for Spaces and the direct `*.hf.space` address, and the D-09 public-Space wording corrected across REQUIREMENTS, ROADMAP, PROJECT and CLAUDE.md (DEPLOY-01, DEPLOY-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -300,7 +300,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. QC Engine Seam and Pinned Environment | 6/6 | Complete    | 2026-09-10 |
 | 2. Detection Correctness and Three-Format Harness | 6/6 | Complete    | 2026-09-10 |
 | 3. Verdict and Report Integrity | 4/4 | Complete    | 2026-09-10 |
-| 4. Central Deployment and Officer Identity | 1/6 | In Progress|  |
+| 4. Central Deployment and Officer Identity | 3/6 | In Progress|  |
 | 5. Submission Record | 0/TBD | Not started | - |
 | 6. Threshold Configuration and Advisory Severity | 0/TBD | Not started | - |
 | 7. Geometry, Population and Coverage Layers | 0/TBD | Not started | - |

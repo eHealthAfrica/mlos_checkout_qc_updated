@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Central Deployment and Officer Identity
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-09-11T16:20:26.428Z"
-last_activity: 2026-09-11
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-12T08:21:27.134Z"
+last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: 0a8817808a556ef1bd47c958b12dbffdd7a100eb
+state_head: 8b35ff9ce52e5aa6d7b26cb878970701237431b5
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 22
-  completed_plans: 17
+  completed_plans: 19
   percent: 14
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 04 (Central Deployment and Officer Identity) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
-Last activity: 2026-09-11 — Phase 04 execution started
+Last activity: 2026-09-12 — Phase 04 execution started
 
 Progress: [█░░░░░░░░░] 14%
 
@@ -78,6 +78,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 03 P04 | 55min | 3 tasks | 6 files |
 | Phase 04 P01 | 46min | 3 tasks | 11 files |
 | Phase 04 P02 | 30 min | 2 tasks | 6 files |
+| Phase 04 P03 | 35min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -131,6 +132,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [Phase 04] 04-02: SMTP recipients moved to Space secrets (SMTP_TO/SMTP_CC) via qc/mail_config.py; Send button disabled with a stated reason when SMTP_TO is empty, and send_qc_email refuses directly too.
 - [Phase 04]: [Phase 04] 04-02: looks_like_a_secret's identifier exclusion narrowed to all-lowercase/underscore identifiers only, after measuring a ~30-36% false-negative collision rate between a bare str.isidentifier() check and freshly generated secrets.token_urlsafe/token_hex values.
 - [Phase 04]: [Phase 04] 04-02: tests/test_no_committed_secrets.py's GENERIC_ADDRESS_RE excludes RFC 2606/6761 reserved example/test domains (example.com, x.test, etc.) so address-parsing test fixtures are not flagged as permanent offenders.
+- [Phase 04]: Native streamlit SDK chosen over docker per STACK.md (Docker SDK loses the XSRF/cookie workaround st.file_uploader needs); sdk_version and hf_oauth kept provably absent from Space front matter. — Requirements.txt stays the single source of truth for the Streamlit version; native HF OAuth was researched and declined per D-01.
+- [Phase 04]: Task 3 wording sweep classified private-Space language for editing vs private-HF-Dataset-repo language for preservation before touching any of the four documents. — Verified afterward by an exact per-file occurrence count ([2,1,3,1]) plus a following-context regex, matching the plan's own specified counts.
 
 ### Pending Todos
 
@@ -156,6 +159,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-11T16:20:26.361Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-09-12T08:21:27.073Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
