@@ -254,9 +254,20 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 05-01-PLAN.md — Pure record builder, id/path minting and the daemon-thread uploader, wired end to end from a fresh QC run to a commit on the Dataset repo
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 05-02-PLAN.md — Bounded retry with backoff, exception containment, and the standing guards that no record is written from a cached replay and no tracked source can delete or overwrite one
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 05-03-PLAN.md — The officer's three-state status line and unconfigured banner, the record id on the workbook cover and in the email footer, and the documentation for both new secrets
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 05-04-PLAN.md — The AUDIT-03 concurrency test, the human-created organisation-owned private Dataset repo with its two secrets, and one live run of the launch gate
 
 **Notes**: One JSON file per submission (UUID + timestamp) in a folder watched by `CommitScheduler` — not appends to one shared log file. Git commits from independent Streamlit sessions are not automatically serialised, and concurrent file *creates* are handled far better by git than concurrent modifications to one file. A Space filesystem is ephemeral, so anything that must survive a rebuild or idle restart goes to the Dataset repo. Criterion 3 is a launch gate: it "works" locally and fails subtly under real concurrency. **Superseded in part by 05-CONTEXT.md D-05:** the one-file-per-submission shape stands, but the `CommitScheduler` delivery mechanism was presented and not chosen — records sitting in its buffer between pushes are lost when the Space rebuilds or is killed — in favour of a direct per-record upload from a background thread.
