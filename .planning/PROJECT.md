@@ -66,7 +66,7 @@ defects inside several of them, and M1 corrects those without removing the capab
 
 **M2 — Central deployment.** Get it into officers' hands before growing the rule set.
 
-- [ ] Deployed as a single private Hugging Face Space reachable by officers in every state
+- [ ] Deployed as a single access-controlled Hugging Face Space, public at the platform level, gated by app-level Google sign-in, reachable by officers in every state
 - [ ] OIDC login for identity — no passwords stored by this application
 - [ ] Submission log (who checked what, when, with what verdict) appended to a private Hugging Face Dataset repo
 - [ ] SMTP credentials and recipient list moved out of the repository into Space secrets
@@ -123,7 +123,7 @@ F2 and F9 are unhandled consequences of it, not reasons to reverse it.
 - **Hosting**: Free tier only, on Hugging Face Spaces — Chosen over Streamlit Community Cloud because the free CPU tier offers roughly 16 GB RAM against ~1 GB. SQ4 is quadratic and the Excel report builder is memory-hungry, so the headroom is load-bearing, not luxury.
 - **Storage**: A Space's filesystem is ephemeral — Anything that must survive a rebuild or idle restart goes to a private HF Dataset repo. A local SQLite of accounts or logs would be silently wiped.
 - **Security**: No passwords stored by this application — Identity comes from an OIDC provider. SMTP credentials and the recipient list live in Space secrets and are never committed.
-- **Privacy**: Settlement coordinates and population figures — The Space must be private. This is why hosting choice is a governance question and not only a technical one.
+- **Privacy**: Settlement coordinates and population figures — What protects them is the application's sign-in and domain gate, not the platform's visibility flag. This is why hosting choice is a governance question and not only a technical one.
 - **Configuration**: Plausibility and coverage thresholds are rules of thumb, not a published standard — They must live in configuration and be tunable without a code change, so a wrong threshold is a settings edit rather than a deploy.
 - **Compatibility**: A verdict must not depend on upload format — `.sqlite`, `.csv` and `.xlsx` exports of the same data must produce identical check summaries. Three audited defects currently violate this.
 

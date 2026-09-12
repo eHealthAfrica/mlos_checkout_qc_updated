@@ -9,7 +9,7 @@ rule registry with unique identity and stable ordering, one pure `qc/` package, 
 dependency set), then detection semantics that
 no longer depend on upload format, then aggregation and reporting that describe every layer that
 ran. Only once "a file this tool calls clean is clean" actually holds does the tool leave one
-laptop for a private Hugging Face Space that officers in every state reach and sign into, with
+laptop for a Hugging Face Space that officers in every state reach and sign into, with
 every run recorded append-only. Growth comes last: a tiering-and-thresholds contract, and then
 three new QC layers — real ward polygons, population plausibility, and team-day coverage — built
 against the test harness and reporting at an Advisory severity that cannot move the verdict.
@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: QC Engine Seam and Pinned Environment** - Unique rule identity, stable rule order, one pure `qc/` package, one known dependency set (completed 2026-09-10)
 - [x] **Phase 2: Detection Correctness and Three-Format Harness** - Same data, same findings, whatever format it arrived in (completed 2026-09-10)
 - [x] **Phase 3: Verdict and Report Integrity** - Verdict, score, report and email describe every layer that ran (completed 2026-09-10)
-- [ ] **Phase 4: Central Deployment and Officer Identity** - One private Space URL, signed-in officers, no committed credentials
+- [ ] **Phase 4: Central Deployment and Officer Identity** - One Space URL, signed-in officers, no committed credentials
 - [ ] **Phase 5: Submission Record** - Append-only log of who checked what, when, with what verdict
 - [ ] **Phase 6: Threshold Configuration and Advisory Severity** - The tunable-threshold and severity-tier contract new layers plug into
 - [ ] **Phase 7: Geometry, Population and Coverage Layers** - Real ward polygons, population ratios, team-day coherence
@@ -204,7 +204,7 @@ Plans:
 **Requirements**: DEPLOY-01, DEPLOY-02, DEPLOY-03, DEPLOY-04, AUTH-01, AUTH-02, AUTH-03
 **Success Criteria** (what must be TRUE):
 
-  1. An officer in any state opens one private `*.hf.space` URL directly — not the `huggingface.co/spaces/...` embed — and reaches the tool with login cookies intact
+  1. An officer in any state opens one `*.hf.space` URL directly — not the `huggingface.co/spaces/...` embed — and reaches the tool with login cookies intact
   2. No QC check can be run before signing in, and the application stores no password of its own
   3. Sign-in is verified working against the deployed Space URL, not only localhost
   4. SMTP credentials and the recipient list are read from Space secrets, appear nowhere in the working tree, and the addresses previously committed at `app.py:644-647` are absent from full git history

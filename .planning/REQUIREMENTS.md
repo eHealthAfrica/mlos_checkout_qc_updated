@@ -45,7 +45,7 @@ Rule identity, state handling and the structural seam the new layers will be bui
 
 ### Deployment (M2)
 
-- [ ] **DEPLOY-01**: The app runs as a single private Hugging Face Space that officers in every state reach at one URL
+- [ ] **DEPLOY-01**: The app runs as a single access-controlled Hugging Face Space, public at the platform level, gated by app-level Google sign-in, that officers in every state reach at one URL
 - [x] **DEPLOY-02**: SMTP credentials and the email recipient list are read from Space secrets and appear nowhere in the repository
 - [ ] **DEPLOY-03**: Organisational email addresses currently committed at `app.py:644-647` are removed from git history, not only from the working tree
 - [ ] **DEPLOY-04**: Officers are given the direct `*.hf.space` URL rather than the `huggingface.co/spaces/...` embed, so login cookies are not blocked by the iframe
