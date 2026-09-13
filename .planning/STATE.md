@@ -4,10 +4,10 @@ current_phase: 05
 current_phase_name: Submission Record
 status: executing
 stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-09-13T07:45:49.332Z"
+last_updated: "2026-09-13T07:46:30.273Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 05 execution started
-state_head: 19e3d7706041a70b3c6dbe100ad16bb5d7107633
+state_head: c0045ead234ca5e40ed3de2be65b88d56a3239f7
 progress:
   total_phases: 7
   completed_phases: 1
@@ -135,6 +135,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [Phase 04] 04-02: tests/test_no_committed_secrets.py's GENERIC_ADDRESS_RE excludes RFC 2606/6761 reserved example/test domains (example.com, x.test, etc.) so address-parsing test fixtures are not flagged as permanent offenders.
 - [Phase 04]: Native streamlit SDK chosen over docker per STACK.md (Docker SDK loses the XSRF/cookie workaround st.file_uploader needs); sdk_version and hf_oauth kept provably absent from Space front matter. — Requirements.txt stays the single source of truth for the Streamlit version; native HF OAuth was researched and declined per D-01.
 - [Phase 04]: Task 3 wording sweep classified private-Space language for editing vs private-HF-Dataset-repo language for preservation before touching any of the four documents. — Verified afterward by an exact per-file occurrence count ([2,1,3,1]) plus a following-context regex, matching the plan's own specified counts.
+- [Phase 05]: [Phase 05] 05-01: Package-legitimacy checkpoint for huggingface_hub>=1.30.0,<2.0.0 approved-with-evidence (2026-09-13); the seam's SUS verdict (too-new, unknown-downloads) disposed as a PyPI metadata false positive, as Phase 1 did for pandas/numpy/pytest. — 321 releases over ~7 years, ~333M downloads/month, source github.com/huggingface/huggingface_hub by Hugging Face, Inc.; clean network-free import verified in a throwaway venv; nothing installed before approval.
+- [Phase 05]: [Phase 05] 05-01: Record id, repo path and timestamp are minted as one three-tuple before any network call, and the fire site sits once after the shared QcSummary behind a _fresh_qc_run flag set only in the fresh-run branch (D-06 refined, not weakened); the worker thread makes zero st.* and zero auth calls, token and repo id resolved on the main thread. — A second summary inside the cache else-branch would be the two-derivations shape Phase 3 removed (F1/F8); the three-tuple keeps a record's own timestamp from disagreeing with its month folder; Streamlit's docs flag session_state access from a thread as unsupported.
 
 ### Pending Todos
 
