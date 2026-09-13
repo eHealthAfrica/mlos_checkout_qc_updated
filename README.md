@@ -324,7 +324,7 @@ The report file is named: `{filename}_QC_Report.xlsx`
 
 The workbook always contains the same sheets, in this order, whether the submission is clean or failing:
 
-1. **QC Report Cover** — the verdict and the weighted score (with its achievable maximum), plus file metadata: filename, generated-at timestamp, MLoS row count, Takeoffpoint row count. Per-layer counts live on the summary sheet below, not the cover.
+1. **QC Report Cover** — the verdict and the weighted score (with its achievable maximum), plus file metadata: filename, generated-at timestamp, the submission log's Record ID, MLoS row count, Takeoffpoint row count. The Record ID sits beside the generated-at timestamp and reads `not recorded` when the run was never logged (secret unconfigured, or the write did not complete) — so a filed report traces back to exactly one submission-log entry, or plainly says it does not. Per-layer counts live on the summary sheet below, not the cover.
 2. **QC Summary** — one combined sheet listing every check that ran, in registry rule order, with a `Layer` column. A layer that ran zero checks appears here as a single placeholder row naming the gap — e.g. `Takeoffpoint — not run: no Takeoffpoint data supplied` — with `n/a` in its Failing Rows, Total Rows and Fail % columns, so the sheet alone can never read as a four-layer tool.
 3. **Schema Issue Detail**
 4. **MLoS Issue Detail**
@@ -353,9 +353,9 @@ next to the button, while `SMTP_TO` is unset or empty.
 | Field | Value |
 |-------|-------|
 | **Subject** | Carries the verdict: `MLoS QC: FAILING (12 checks) — kano_checkout.xlsx` or `MLoS QC: CLEAN — kano_checkout.xlsx` |
-| **Body** | Plain text: the verdict sentence; the weighted score with its achievable maximum; the headline issue-rows figure; one block per layer (in canonical order) with checks run, checks failing and its issue-rows line — or `not run: no Takeoffpoint data supplied` for a layer that did not run; the existing missing-columns block; then a check-by-check list grouped under layer headings, in rule order |
+| **Body** | Plain text: the verdict sentence; the weighted score with its achievable maximum; the headline issue-rows figure; one block per layer (in canonical order) with checks run, checks failing and its issue-rows line — or `not run: no Takeoffpoint data supplied` for a layer that did not run; the existing missing-columns block; then a check-by-check list grouped under layer headings, in rule order; a footer with the submission log's Record ID beside the Generated line |
 
-A clean email still lists **every check that ran**, passing and failing, so the reader can see exactly what was verified. The renamed-columns report (§2) is not part of the email — it stays in the on-screen expander and the report's Columns Renamed sheet only.
+A clean email still lists **every check that ran**, passing and failing, so the reader can see exactly what was verified. The renamed-columns report (§2) is not part of the email — it stays in the on-screen expander and the report's Columns Renamed sheet only. Like the report cover (§10), the footer's Record ID reads `not recorded` when the run was never logged.
 
 Recipients and SMTP credentials are configured as Space secrets — see the Deployment section
 below for the full list (rewritten for Hugging Face Spaces). On a local
@@ -422,6 +422,8 @@ configuration file at startup, before any other Streamlit call runs.
 | `DATA_TEAM_CONTACT` | Contact address shown on the refusal page to an authenticated, out-of-domain visitor | The data team |
 | `SMTP_TO` | Comma-separated primary recipients for the QC summary email | The data team |
 | `SMTP_CC` | Comma-separated copy recipients for the QC summary email | The data team |
+| `MLOS_LOG_TOKEN` | Write access for the submission log | A **fine-grained** Hugging Face token scoped to write on the one Dataset repo below and nothing else, created by a human. A classic account-wide `write` token is the wrong choice here — it would grant write access to every repository the account owns, not just this one |
+| `MLOS_LOG_REPO` | The private Dataset repo the submission log is written to | The organisation-owned repo id, in `owner/name` form, created by a human — see §5 below |
 | `smtp_host` | Mail server hostname (not an email address) | Your mail provider |
 | `smtp_port` | Mail server port | Your mail provider |
 | `smtp_user` | SMTP account username | Your mail provider |
@@ -443,7 +445,34 @@ harmless there.
 Google OAuth client's authorised redirect URI list before sign-in can work at all — the client
 already exists (see step 2); only the Space's own redirect URI is new.
 
-### 5. The address to give officers
+### 5. The submission log
+
+After every completed QC run, the app writes one JSON record naming the officer, the time, the
+file and the verdict to a **private** Hugging Face Dataset repo — the submission log (AUDIT-01
+to AUDIT-05).
+
+- **Ownership.** The repo is owned by an **eHealth Africa organisation** on Hugging Face, not a
+  personal account, so it survives staff changes and its collaborator list can be reviewed at
+  each milestone.
+- **Private, independently of the Space.** The repo's own private-visibility setting must be
+  confirmed on the repo itself, not inferred from the Space's own visibility — the Space is
+  public at the platform level (§1) and the Dataset repo is a completely separate setting.
+- **Path layout.** Records are written one JSON file per submission at
+  `records/YYYY/MM/<UTC compact timestamp>_<uuid4>.json`, for example
+  `records/2026/09/20260912T101530Z_3f2a....json`. The filename stem is the record id printed on
+  the report cover and in the email footer (see §10, §11).
+- **Append-only.** The log is append-only and the application offers no path to edit, overwrite
+  or delete a record — a standing test guards this in code, and the fine-grained write token
+  (`MLOS_LOG_TOKEN` above) is the second line of defence, not the first.
+- **No read-back.** The app never reads the log back — querying and charting it are deferred to
+  a future phase.
+- **When it is not configured.** With either `MLOS_LOG_TOKEN` or `MLOS_LOG_REPO` unset, QC runs
+  to a verdict exactly as normal, nothing is recorded, and a banner above the tabs says so.
+
+A ready-to-paste README for the Dataset repo itself — describing its record schema — ships at
+[`docs/DATASET_REPO_README.md`](docs/DATASET_REPO_README.md).
+
+### 6. The address to give officers
 
 Give officers the **direct Space address** — the `https://<your-space>.hf.space` host — never
 the `huggingface.co/spaces/<org>/<space>` project page. The project page embeds the app inside a
@@ -452,7 +481,7 @@ inside it, so an officer who uses that address appears to sign in and then appea
 again on every subsequent click. Distributing only the direct `.hf.space` address is the whole
 fix for this.
 
-### 6. Idle sleep
+### 7. Idle sleep
 
 A free Space sleeps after roughly 48 hours idle and cold-starts on the next visit, so a slow first
 load after a quiet weekend is expected behaviour, not a fault. Paid always-on hosting is out of
