@@ -112,7 +112,7 @@ def test_mint_two_calls_same_ts_produce_distinct_ids_and_paths():
 # ─── build_record ────────────────────────────────────────────────────────────────────────────
 
 def _officer():
-    return {"email": "officer@ehealthnigeria.org", "name": "Test Officer", "domain": "ehealthnigeria.org"}
+    return {"email": "officer@example.com", "name": "Test Officer", "domain": "example.com"}
 
 
 def _file_identity():
@@ -141,17 +141,29 @@ def test_build_record_timestamp_iso_format():
     assert record["timestamp_utc"].endswith("+00:00")
 
 
+def _walk_values(obj):
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from _walk_values(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_values(v)
+    else:
+        yield obj
+
+
 def test_build_record_officer_email_only():
     """Without this, the record could leak the officer's display name or domain, which D-01
-    deliberately excludes -- the email is the only identity chosen."""
+    deliberately excludes -- the email is the only identity chosen. (The email legitimately
+    contains the domain as a substring, so this checks value equality, not substring presence.)"""
     summary = _summary_five_layers()
     ts = datetime.now(timezone.utc)
     officer = _officer()
     record = submission_record.build_record(summary, officer, _file_identity(), "rid1", ts)
     assert record["officer_email"] == officer["email"]
-    serialized = json.dumps(record)
-    assert officer["name"] not in serialized
-    assert officer["domain"] not in serialized
+    values = list(_walk_values(record))
+    assert officer["name"] not in values
+    assert officer["domain"] not in values
 
 
 def test_build_record_layers_key_order_matches_layer_order():

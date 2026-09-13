@@ -14,12 +14,14 @@ import qc
 import qc.columns
 import qc.mail_config
 import qc.report
+import qc.submission_record
 from qc.domain import VALID_ACC, VALID_HAB, VALID_YN, VALID_YN_NA, YN_NA_COLS
 from qc.loaders import (
     MLOS_VIEW, TAKEOFF_VIEW, load_sqlite, load_view, load_csv, load_xlsx,
     load_submission, load_takeoffpoint_file,
 )
 import auth
+import submission_log
 
 # ─── Auth Secrets ────────────────────────────────────────────────────────────────
 auth.materialize_auth_secrets()
@@ -587,6 +589,12 @@ if st.session_state.get("qc_cache_key") == qc_cache_key:
     mlos_corrected     = st.session_state["mlos_corrected"]
     autocorrect_log    = st.session_state["autocorrect_log"]
     load_progress.progress(100)
+    # D-06/D-11: read the record id/path back so the workbook cover and email footer carry
+    # it on a cached replay too; _fresh_qc_run stays False so submission_log.fire_upload is
+    # never called again for the same run.
+    _fresh_qc_run = False
+    _record_id = st.session_state.get("submission_record_id")
+    _record_path = st.session_state.get("submission_record_path")
 else:
     qc_bar = st.progress(0, text="⏳ Starting QC checks…")
     with st.status("Running QC checks…", expanded=True) as _qc_status:
@@ -674,6 +682,14 @@ else:
     st.session_state["boundary_detail"]    = boundary_detail
     st.session_state["mlos_corrected"]     = mlos_corrected
     st.session_state["autocorrect_log"]    = autocorrect_log
+    # D-11: mint the id/path synchronously, before any network call, so the workbook cover
+    # and email footer always have an id regardless of the upload's outcome. D-06: this is
+    # the ONLY place _fresh_qc_run becomes True -- nothing may be added to the cached branch
+    # above.
+    _record_id, _record_path, _record_ts = qc.submission_record.mint_record_id_and_path()
+    st.session_state["submission_record_id"]   = _record_id
+    st.session_state["submission_record_path"] = _record_path
+    _fresh_qc_run = True
 
 # ── Shared verdict/score/count computation (VERDICT-05/F1/F6/F8's structural fix) ──────────
 # Built exactly once, immediately after the cache if/else above has resolved both arms to the
@@ -691,6 +707,23 @@ summary = qc.report.build_summary(
     mlos_row_count=len(mlos_corrected),
     takeoff_row_count=len(takeoff_df),
 )
+
+# D-06's guarantee, made provable: the *decision* to fire is made by the branch that ran
+# the five layers, through the _fresh_qc_run flag set only there -- never here. Building or
+# firing a second summary/record inside the cached branch is the exact two-derivations
+# shape Phase 3 removed (F1/F8); nothing may be added to the cached `if` branch above (D-06).
+if _fresh_qc_run:
+    _submission_file_identity = {
+        "filename": filename,
+        "sha256": submission_identity[0],
+    }
+    if uploaded_tp is not None:
+        _submission_file_identity["tp_filename"] = uploaded_tp.name
+        _submission_file_identity["tp_sha256"] = submission_identity[1]
+    _record = qc.submission_record.build_record(
+        summary, auth.current_officer(), _submission_file_identity, _record_id, _record_ts
+    )
+    submission_log.fire_upload(_record, _record_path, _record_id)
 
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
 st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_corrected):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")

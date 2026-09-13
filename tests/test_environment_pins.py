@@ -10,6 +10,7 @@ directory, so the suite passes regardless of where ``pytest`` is invoked from.
 
 from pathlib import Path
 
+import huggingface_hub
 import numpy
 import pandas
 
@@ -101,6 +102,30 @@ def test_authlib_is_declared_with_both_bounds():
     authlib_line = authlib_lines[0]
     assert ">=1.3.2" in authlib_line, f"Authlib line {authlib_line!r} is missing the '>=1.3.2' lower bound"
     assert "<2.0.0" in authlib_line, f"Authlib line {authlib_line!r} is missing the '<2.0.0' upper bound"
+
+
+def test_huggingface_hub_is_declared_with_both_bounds():
+    """huggingface_hub writes the submission log to a private HF Dataset repo (AUDIT-02/D-05)
+    and must carry both bounds, matching test_every_runtime_dependency_is_bounded's requirement
+    that no dependency line may drift into an untested major version silently."""
+    lines = _read_requirement_lines()
+    hf_lines = [line for line in lines if line.split(">")[0].split("<")[0].split("=")[0] == "huggingface_hub"]
+    assert hf_lines, "requirements.txt does not declare a huggingface_hub dependency at all"
+    assert len(hf_lines) == 1, f"expected exactly one huggingface_hub line, found: {hf_lines}"
+    hf_line = hf_lines[0]
+    assert ">=1.30.0" in hf_line, f"huggingface_hub line {hf_line!r} is missing the '>=1.30.0' lower bound"
+    assert "<2.0.0" in hf_line, f"huggingface_hub line {hf_line!r} is missing the '<2.0.0' upper bound"
+
+
+def test_huggingface_hub_installed_version_satisfies_the_pin():
+    """The huggingface_hub actually importable in this interpreter must fall inside the
+    declared >=1.30.0,<2.0.0 range -- a declared-but-uninstalled or drifted-major dependency is
+    not caught by the string checks above."""
+    version = huggingface_hub.__version__
+    parts = version.split(".")
+    major, minor = int(parts[0]), int(parts[1])
+    assert (major, minor) >= (1, 30), f"installed huggingface_hub {version!r} is older than 1.30.0"
+    assert major < 2, f"installed huggingface_hub {version!r} does not satisfy the <2.0.0 upper bound"
 
 
 def test_every_runtime_dependency_is_bounded():
