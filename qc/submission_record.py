@@ -22,6 +22,46 @@ from qc.version import VERSION
 
 RECORD_SCHEMA = 1
 
+# D-09/AUDIT-05: the four officer-facing states submission_log._set_status ever stores, and the
+# only vocabulary status_line() below ever reads. Kept here, beside the record builder, rather
+# than in submission_log.py, because this module is the one place both submission_log.py (the
+# writer of these strings) and app.py (the reader/wording consumer) both already import --
+# spelling the values once means the two can never drift into different vocabularies.
+STATUS_PENDING = "pending"
+STATUS_RECORDED = "recorded"
+STATUS_FAILED = "failed"
+STATUS_UNCONFIGURED = "unconfigured"
+STATUS_VALUES = (STATUS_PENDING, STATUS_RECORDED, STATUS_FAILED, STATUS_UNCONFIGURED)
+
+
+def status_line(status, record_id):
+    """D-09: the one function that words all three officer-facing states (plus the degrade
+    case) -- so the screen cannot word a state differently from any other surface, the same
+    one-source-of-truth rule Phase 3 applied to the verdict sentence (``QcSummary.verdict_text``).
+
+    Returns a ``(severity, text)`` pair: ``severity`` is the literal ``"quiet"`` (an
+    ``st.caption``-shaped line) or ``"warn"`` (an ``st.warning``-shaped line). ``status`` not
+    among ``STATUS_VALUES`` -- including a status introduced by a future change this function
+    was never taught about -- degrades to the pending pair rather than raising: an officer must
+    never meet a traceback on their own results page because a new state was added upstream.
+    """
+    if status == STATUS_RECORDED:
+        text = "The submission record was saved"
+        text += f" (ID: {record_id})." if record_id else "."
+        return "quiet", text
+    if status == STATUS_FAILED:
+        return (
+            "warn",
+            "The submission record could not be saved -- your verdict is unaffected.",
+        )
+    if status == STATUS_UNCONFIGURED:
+        return (
+            "warn",
+            "Submission recording is not configured -- QC still ran and nothing was recorded.",
+        )
+    # STATUS_PENDING, and any status this function does not recognise: degrade to "in progress".
+    return "quiet", "The submission record is being saved."
+
 
 def mint_record_id_and_path(ts=None):
     """D-14: mint a record id and its Dataset-repo path from one UTC instant.

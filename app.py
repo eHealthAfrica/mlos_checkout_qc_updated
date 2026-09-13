@@ -738,6 +738,16 @@ c6.metric("📈 Pass Rate",     summary.pct_pass)
 c7.metric("🏆 Weighted Score", f"{summary.weighted_score:.1f}%",
           help=f"of {summary.achievable_max:.1f}% achievable")
 
+# ─── SUBMISSION RECORDING BANNER ──────────────────────────────────────────────────
+# D-10: rendered once, above every tab (never inside a single tab's body) so a missing secret
+# stays visible no matter which of the eight tabs the officer has open -- a warning rendered
+# inside one tab is invisible from the other seven. This block only reads the configuration
+# check; it never calls fire_upload and never assigns to summary or any checks/detail name -- the
+# banner observes the run, it does not participate in it.
+_recording_unconfigured_reason = submission_log.unconfigured_reason()
+if _recording_unconfigured_reason is not None:
+    st.warning(_recording_unconfigured_reason)
+
 st.markdown("---")
 
 # ─── VERDICT BANNER ───────────────────────────────────────────────────────────────
@@ -1221,6 +1231,21 @@ with tab8:
     else:
         st.warning(f"⚠️ {summary.verdict_text} — {summary.headline_issue_line}. "
                    f"Fix and re-upload before submission.")
+
+    # D-09: the quiet three-state status line, immediately after the verdict success/warning
+    # pair above. When recording is unconfigured, the persistent banner above the tabs already
+    # said so -- repeating it here would turn a quiet line into a loud one, so this block renders
+    # nothing in that case. The upload runs on a background thread that makes zero UI-framework
+    # calls (submission_log.py), so this line reflects the last known status and updates on the
+    # officer's next interaction rather than live, never blocking and never touching the verdict.
+    if _recording_unconfigured_reason is None:
+        _status_severity, _status_text = qc.submission_record.status_line(
+            submission_log.get_status(_record_id), _record_id
+        )
+        if _status_severity == "warn":
+            st.warning(_status_text)
+        else:
+            st.caption(_status_text)
 
     st.markdown("---")
     st.markdown("**📧 Send QC Summary by Email**")
