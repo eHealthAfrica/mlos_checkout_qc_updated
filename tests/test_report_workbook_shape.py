@@ -78,12 +78,13 @@ def _takeoff_df(empty=False):
     return pd.DataFrame({"name": ["TP-A"], "code": ["TPC-A"], "wardcode": ["81110"]})
 
 
-def _cover_sheet(summary, mlos_raw=None, takeoff_df=None, column_renames=None):
+def _cover_sheet(summary, mlos_raw=None, takeoff_df=None, column_renames=None, record_id=None):
     out = report.build_workbook(
         summary,
         mlos_raw if mlos_raw is not None else _mlos_raw(),
         takeoff_df if takeoff_df is not None else _takeoff_df(),
         column_renames=column_renames,
+        record_id=record_id,
     )
     wb = openpyxl.load_workbook(io.BytesIO(out))
     return wb, wb["QC Report Cover"]
@@ -125,20 +126,23 @@ def test_cover_carries_score_display_ending_with_achievable():
     assert summary.score_display.endswith("achievable")
 
 
-def test_cover_labels_are_exactly_the_five_metadata_rows_no_per_layer_counts():
+def test_cover_labels_are_exactly_the_six_metadata_rows_no_per_layer_counts():
+    """D-08 fixed the metadata block at five rows with no per-layer counts; D-11 (05-03 Task 2)
+    deliberately adds exactly one more non-per-layer row -- Record ID, beside Generated At -- so
+    this is a planned six-row extension of D-08, not drift against it."""
     summary = _summary_only_boundary_failing()
     _, ws = _cover_sheet(summary)
-    meta_labels = {"File", "Generated At", "MLoS Rows", "Takeoffpoint Rows", "Weighted Score"}
+    meta_labels = {"File", "Generated At", "Record ID", "MLoS Rows", "Takeoffpoint Rows", "Weighted Score"}
     all_col_a = [ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)]
     found_meta = [v for v in all_col_a if v in meta_labels]
-    assert found_meta == ["File", "Generated At", "MLoS Rows", "Takeoffpoint Rows", "Weighted Score"]
+    assert found_meta == ["File", "Generated At", "Record ID", "MLoS Rows", "Takeoffpoint Rows", "Weighted Score"]
     assert not any(isinstance(v, str) and "Checks" in v for v in all_col_a)
 
 
 def test_verdict_row_is_below_the_metadata_block():
     summary = _summary_only_boundary_failing()
     _, ws = _cover_sheet(summary)
-    meta_labels = {"File", "Generated At", "MLoS Rows", "Takeoffpoint Rows", "Weighted Score"}
+    meta_labels = {"File", "Generated At", "Record ID", "MLoS Rows", "Takeoffpoint Rows", "Weighted Score"}
     meta_rows = [r for r in range(1, ws.max_row + 1) if ws.cell(row=r, column=1).value in meta_labels]
     verdict_rows = [
         r for r in range(1, ws.max_row + 1)

@@ -363,7 +363,7 @@ def summary_rows(summary: QcSummary) -> list:
 
 
 def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd.DataFrame",
-                    column_renames=None) -> bytes:
+                    column_renames=None, record_id=None) -> bytes:
     """Build the downloadable QC report workbook, relocated from ``app.py``'s
     ``build_excel_report`` (Analog D, 03-PATTERNS.md).
 
@@ -413,11 +413,15 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
     ws["A1"].alignment = ctr
     ws.row_dimensions[1].height = 38
 
-    # D-08: exactly five metadata rows -- File, Generated At, MLoS Rows, Takeoffpoint Rows,
-    # Weighted Score -- and no per-layer counts. Per-layer counts moved to the QC Summary sheet.
+    # D-08 (extended by D-11): six metadata rows -- File, Generated At, Record ID, MLoS Rows,
+    # Takeoffpoint Rows, Weighted Score -- and no per-layer counts. Per-layer counts live on the
+    # QC Summary sheet. Record ID sits immediately beside Generated At (D-11) and is a stated
+    # placeholder, "not recorded", rather than a blank cell when no id exists -- a blank would
+    # read as an oversight on a printed report where a record genuinely was not written.
     meta = [
         ("File",              summary.filename),
         ("Generated At",      datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ("Record ID",         record_id or "not recorded"),
         ("MLoS Rows",         len(mlos_raw)),
         ("Takeoffpoint Rows", len(takeoff_df)),
         ("Weighted Score",    summary.score_display),
@@ -559,16 +563,20 @@ def build_workbook(summary: QcSummary, mlos_raw: "pd.DataFrame", takeoff_df: "pd
 EMAIL_SUBJECT_PREFIX = "MLoS QC:"
 
 
-def build_email_subject_and_body(summary: QcSummary) -> "tuple[str, str]":
+def build_email_subject_and_body(summary: QcSummary, record_id=None) -> "tuple[str, str]":
     """Build the emailed summary's subject and plain-text body (D-14/D-16), relocated and pure --
     Analog F in 03-PATTERNS.md.
 
-    Pure: takes only the shared ``QcSummary``, reads no secrets (``st.secrets``), imports no
-    transport (``smtplib``), so it is unit-testable without a Streamlit runtime or an SMTP mock.
-    ``app.py``'s ``send_qc_email`` calls this and stays a thin SMTP sender.
+    Pure: takes only the shared ``QcSummary`` and, since 05-03, an optional ``record_id`` (D-11);
+    reads no secrets (``st.secrets``), imports no transport (``smtplib``), so it is unit-testable
+    without a Streamlit runtime or an SMTP mock. ``app.py``'s ``send_qc_email`` calls this and
+    stays a thin SMTP sender.
 
     Task 2 adds the per-layer blocks (D-14), the Schema missing-columns block and the grouped
-    check-by-check list (D-15) between the header and the footer.
+    check-by-check list (D-15) between the header and the footer. 05-03 Task 2 adds the footer's
+    ``Record ID`` line (D-11) beside the existing ``Generated`` line -- the id is a traceability
+    handle, not a decision input, so it never enters the subject: putting it there would make
+    every email's subject unique and unsortable.
     """
     # D-16: verdict_short, not verdict_text -- the two approved subjects carry no unrun-layer
     # gap clause, and appending the full sentence would put two em-dash separators in one
@@ -644,6 +652,11 @@ def build_email_subject_and_body(summary: QcSummary) -> "tuple[str, str]":
 
     lines.append("")
     lines.append("=" * 60)
+    # D-11: Record ID sits immediately beside Generated, the way it sits beside Generated At on
+    # the workbook cover -- a stated placeholder ("not recorded") rather than a blank line when
+    # no id exists, so a filed report from an unconfigured deployment is never mistaken for a
+    # recorded one.
+    lines.append(f"Record ID: {record_id or 'not recorded'}")
     lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     body = "\n".join(lines) + "\n"
     return subject, body

@@ -296,16 +296,18 @@ def get_recipients():
     return to_list, cc_list, reason
 
 
-def send_qc_email(summary):
+def send_qc_email(summary, record_id=None):
     """Send QC summary email using recipients and SMTP credentials read from Space secrets via
     auth.secret (DEPLOY-02/D-07).
 
-    Thin sender only (03-03 Task 1, continued by 04-02 Task 1): the subject and body are built by
-    ``qc.report``'s pure ``build_email_subject_and_body`` function, which reads only the shared
-    summary object; this function's own job is resolving recipients/credentials and doing the
-    SMTP transport. Recipients are no longer hard-coded here -- an unset or empty SMTP_TO raises
-    before any ``smtplib.SMTP`` construction, so this function refuses to send to nobody even
-    when called directly, outside the Send button's own disabled state (T-04-13).
+    Thin sender only (03-03 Task 1, continued by 04-02 Task 1, continued by 05-03 Task 2): the
+    subject and body are built by ``qc.report``'s pure ``build_email_subject_and_body`` function,
+    which reads only the shared summary object and now also the record id (D-11), forwarded
+    through unchanged; this function's own job is still only resolving recipients/credentials and
+    doing the SMTP transport, never composing the message itself. Recipients are no longer
+    hard-coded here -- an unset or empty SMTP_TO raises before any ``smtplib.SMTP`` construction,
+    so this function refuses to send to nobody even when called directly, outside the Send
+    button's own disabled state (T-04-13).
     """
     import smtplib
     from email.mime.multipart import MIMEMultipart
@@ -315,7 +317,7 @@ def send_qc_email(summary):
     if reason:
         raise RuntimeError(reason)
 
-    subject, body = qc.report.build_email_subject_and_body(summary)
+    subject, body = qc.report.build_email_subject_and_body(summary, record_id=record_id)
 
     smtp_user = auth.secret("smtp_user")
     smtp_host = auth.secret("smtp_host", "smtp.gmail.com")
@@ -1215,7 +1217,8 @@ with tab8:
     with st.spinner("Building Excel report…"):
         report_bytes = qc.report.build_workbook(
             summary, mlos_raw, takeoff_df,
-            column_renames=st.session_state.get("column_renames", {}))
+            column_renames=st.session_state.get("column_renames", {}),
+            record_id=_record_id)
 
     report_file = filename.replace(".sqlite","").replace(".db","") + "_QC_Report.xlsx"
     st.download_button(
@@ -1258,7 +1261,7 @@ with tab8:
     if st.button("📤 Send QC Email", type="primary", key="send_email_btn",
                  disabled=bool(_recipients_reason)):
         try:
-            send_qc_email(summary)
+            send_qc_email(summary, record_id=_record_id)
             st.success("✅ Email sent successfully to the data team.")
         except Exception as e:
             st.error(f"❌ Failed to send email: {e}"
