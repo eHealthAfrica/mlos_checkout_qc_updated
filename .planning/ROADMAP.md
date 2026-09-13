@@ -251,12 +251,12 @@ Plans:
   4. The application offers no path to edit or delete a past record
   5. A failure or delay writing the record leaves the officer's verdict unaffected and on time
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — Pure record builder, id/path minting and the daemon-thread uploader, wired end to end from a fresh QC run to a commit on the Dataset repo
+- [x] 05-01-PLAN.md — Pure record builder, id/path minting and the daemon-thread uploader, wired end to end from a fresh QC run to a commit on the Dataset repo
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -318,7 +318,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Detection Correctness and Three-Format Harness | 6/6 | Complete    | 2026-09-10 |
 | 3. Verdict and Report Integrity | 4/4 | Complete    | 2026-09-10 |
 | 4. Central Deployment and Officer Identity | 3/6 | In Progress|  |
-| 5. Submission Record | 0/TBD | Not started | - |
+| 5. Submission Record | 1/4 | In Progress|  |
 | 6. Threshold Configuration and Advisory Severity | 0/TBD | Not started | - |
 | 7. Geometry, Population and Coverage Layers | 0/TBD | Not started | - |
 
