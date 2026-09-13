@@ -11,8 +11,10 @@ holder that the next rerun's main thread reads.
 
 import json
 import threading
+import time
 
 from huggingface_hub import HfApi
+from huggingface_hub.errors import HfHubHTTPError
 
 import auth
 
@@ -20,9 +22,14 @@ LOG_TOKEN_VAR = "MLOS_LOG_TOKEN"
 LOG_REPO_VAR = "MLOS_LOG_REPO"
 STATUS_CAP = 500
 
-# D-07: a few bounded retries with backoff, about a minute total. This task's failure branch is
-# a single attempt (no retry yet); 05-02 expands this schedule and the retry loop that reads it.
-RETRY_DELAYS = ()
+# D-07: a few bounded retries with backoff, about a minute total across five attempts (1 + 4 +
+# 15 + 40 = 60s of sleeping between the five tries). D-07 explicitly rejects an on-disk retry
+# queue -- that would reintroduce the buffer D-05 already rejected -- so the whole schedule lives
+# in this in-memory tuple and nothing here ever touches a filesystem path. A retry library
+# (tenacity, backoff) was considered and rejected: this is a fifteen-line loop, not a case that
+# needs a dependency (05-RESEARCH.md ## Don't Hand-Roll).
+RETRY_DELAYS = (1, 4, 15, 40)
+MAX_ATTEMPTS = len(RETRY_DELAYS) + 1
 
 _STATUS = {}
 _STATUS_LOCK = threading.Lock()
@@ -93,26 +100,50 @@ def fire_upload(record, path_in_repo, record_id):
     return thread
 
 
-def _upload_with_bounded_retry(record, path_in_repo, record_id, token, repo_id):
-    """Worker: serialise ``record`` and upload it via ``HfApi``. Must reference neither the UI
-    framework nor ``auth`` -- ``token``/``repo_id`` are resolved by the caller and passed in
-    explicitly. This task's failure branch is a single attempt that sets ``"failed"``; 05-02
-    expands it into D-07's bounded retry schedule."""
+def _upload_with_bounded_retry(record, path_in_repo, record_id, token, repo_id,
+                                sleep=time.sleep, api_factory=None):
+    """Worker: serialise ``record`` and upload it via ``HfApi``, retrying on a bounded schedule
+    (D-07). Must reference neither the UI framework nor ``auth`` -- ``token``/``repo_id`` are
+    resolved by the caller and passed in explicitly.
+
+    ``sleep`` and ``api_factory`` default to the real implementations (the stdlib clock, and the
+    module-level ``HfApi``) and exist purely so the test suite can prove the retry schedule and
+    drive a constructor-raises case without spending a minute of wall time or a live Hub call;
+    ``fire_upload`` passes neither, so production behaviour is unchanged.
+
+    The loop attempts the upload immediately, then on each failure sleeps the next value from
+    ``RETRY_DELAYS`` and retries, until either an attempt succeeds (status ``"recorded"``,
+    return) or the delays are exhausted (status ``"failed"``, return). The whole body -- Hub
+    error hierarchy, and a second, broader catch for every other failure including a
+    network-layer error or a constructor failure -- is wrapped so that no path can exit without
+    setting a terminal status: an exception escaping a ``threading.Thread`` target does not crash
+    the process, but it does mean the status holder is never updated, leaving the officer's
+    status line at "in progress" forever -- the silent-failure shape this phase exists to
+    remove."""
+    factory = api_factory if api_factory is not None else HfApi
     payload = json.dumps(record).encode("utf-8")
-    try:
-        HfApi(token=token).upload_file(
-            path_or_fileobj=payload,
-            path_in_repo=path_in_repo,
-            repo_id=repo_id,
-            repo_type="dataset",
-            commit_message=f"submission record {record_id}",
-            # Deliberately no parent-commit keyword: each record's path has never existed, and
-            # supplying a stale value would manufacture 412 rejections between two unrelated
-            # concurrent submissions (RESEARCH ## Concurrency Semantics).
-        )
-        _set_status(record_id, "recorded")
-    except Exception as e:
-        # D-12: only the record id and error class are logged server-side, never the record's
-        # own contents.
-        print(f"submission_log: upload failed for {record_id}: {type(e).__name__}")
-        _set_status(record_id, "failed")
+    for attempt in range(MAX_ATTEMPTS):
+        if attempt > 0:
+            sleep(RETRY_DELAYS[attempt - 1])
+        try:
+            factory(token=token).upload_file(
+                path_or_fileobj=payload,
+                path_in_repo=path_in_repo,
+                repo_id=repo_id,
+                repo_type="dataset",
+                commit_message=f"submission record {record_id}",
+                # Deliberately no parent-commit keyword: each record's path has never existed,
+                # and supplying a stale value would manufacture 412 rejections between two
+                # unrelated concurrent submissions (RESEARCH ## Concurrency Semantics).
+            )
+            _set_status(record_id, "recorded")
+            return
+        except HfHubHTTPError as e:
+            # D-12: only the record id and error class are logged server-side, never the
+            # record's own contents, the token or the repo id.
+            print(f"submission_log: upload failed for {record_id}: {type(e).__name__}")
+        except Exception as e:
+            # Broader catch, deliberate: a network-layer error or a constructor failure must
+            # also leave a terminal status rather than escape this thread's target function.
+            print(f"submission_log: upload failed for {record_id}: {type(e).__name__}")
+    _set_status(record_id, "failed")
