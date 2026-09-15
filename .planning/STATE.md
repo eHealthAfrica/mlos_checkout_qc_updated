@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Submission Record
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-09-13T08:01:17.029Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-09-15T08:22:46.676Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 05 execution started
-state_head: 34813c679f79f1c37e46713b84c0ec1b7671f7b8
+state_head: d75072d79434352c56a78c74ba1f2938d1149ad2
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 26
-  completed_plans: 20
+  completed_plans: 22
   percent: 14
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 05 (Submission Record) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-12 — Phase 05 execution started
 
@@ -81,6 +81,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 04 P03 | 35min | 3 tasks | 6 files |
 | Phase 05 P01 | 55min | 3 tasks | 9 files |
 | Phase 05 P02 | 5min | 3 tasks | 3 files |
+| Phase 05 P03 | 62min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -140,6 +141,8 @@ Recent decisions affecting current work:
 - [Phase 05]: [Phase 05] 05-01: Record id, repo path and timestamp are minted as one three-tuple before any network call, and the fire site sits once after the shared QcSummary behind a _fresh_qc_run flag set only in the fresh-run branch (D-06 refined, not weakened); the worker thread makes zero st.* and zero auth calls, token and repo id resolved on the main thread. — A second summary inside the cache else-branch would be the two-derivations shape Phase 3 removed (F1/F8); the three-tuple keeps a record's own timestamp from disagreeing with its month folder; Streamlit's docs flag session_state access from a thread as unsupported.
 - [Phase 05]: [Phase 05] 05-02: submission_log._upload_with_bounded_retry gained injectable sleep=/api_factory= keyword params so RETRY_DELAYS=(1,4,15,40)/MAX_ATTEMPTS=5's bounded-retry schedule, exception containment (Hub error hierarchy plus a broader catch for constructor/network failures) and D-12's id-and-class-only failure log line are proven without a live Hub call or real sleep; fire_upload passes neither kwarg so production behaviour is unchanged. — A retry library was considered and rejected for a fifteen-line loop (05-RESEARCH.md); the injectable clock/factory pair is the only way to keep the always-failing-case test under 20 seconds while still exercising the real public fire_upload() entry point for the daemon-thread assertion.
 - [Phase 05]: [Phase 05] 05-02: tests/test_no_fire_on_cached_rerun.py and tests/test_no_delete_in_submission_log.py required zero app.py/submission_log.py production changes beyond Task 1's retry loop -- app.py's cache/fresh-run split and submission_log.py's create-only upload call already satisfied D-06's single-guarded-fire-site and D-16's append-only shape exactly as wired in 05-01. — Verified by parsing app.py's real AST directly before writing any test: the one fire_upload( call site already sits inside if _fresh_qc_run:, and the cached branch already reads submission_record_id back from session state with zero calls into submission_log or qc.submission_record.
+- [Phase 05]: [Phase 05] 05-03: status_line() is the single pure function wording all four officer-facing recording states (D-09); the persistent unconfigured banner sits above the tabs and the status line sits inside the Generate Report tab below them, matching the plan's two distinct landmark regions.
+- [Phase 05]: [Phase 05] 05-03: record_id=None threaded onto build_workbook/build_email_subject_and_body as a trailing keyword (column_renames precedent); Task 1's literal verify snippet assumed one st.tabs( call in app.py but two have always existed -- documented as a plan-verification-script assumption, not a production bug, and proven instead via the first-occurring tabs call as landmark.
 
 ### Pending Todos
 
@@ -165,6 +168,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T08:01:16.969Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-09-15T08:22:46.605Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None

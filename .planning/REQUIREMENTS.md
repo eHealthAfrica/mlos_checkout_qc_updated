@@ -58,11 +58,11 @@ Rule identity, state handling and the structural seam the new layers will be bui
 
 ### Submission Record (M2)
 
-- [ ] **AUDIT-01**: Each completed QC run records who ran it, when, which file, and the resulting verdict and score
+- [x] **AUDIT-01**: Each completed QC run records who ran it, when, which file, and the resulting verdict and score
 - [ ] **AUDIT-02**: Records are written one JSON file per submission to a private Hugging Face Dataset repo
 - [ ] **AUDIT-03**: Two officers submitting simultaneously both have their runs recorded, with neither overwritten
 - [ ] **AUDIT-04**: The log is append-only — the application offers no way to edit or delete a past record
-- [ ] **AUDIT-05**: A failure or delay writing the submission record never blocks or slows the officer's verdict
+- [x] **AUDIT-05**: A failure or delay writing the submission record never blocks or slows the officer's verdict
 
 ### Threshold Configuration (M3)
 
@@ -182,11 +182,11 @@ Every v1 requirement maps to exactly one phase in `.planning/ROADMAP.md`.
 | AUTH-01 | Phase 4 | Complete |
 | AUTH-02 | Phase 4 | Complete |
 | AUTH-03 | Phase 4 | Pending |
-| AUDIT-01 | Phase 5 | Pending |
+| AUDIT-01 | Phase 5 | Complete |
 | AUDIT-02 | Phase 5 | Pending |
 | AUDIT-03 | Phase 5 | Pending |
 | AUDIT-04 | Phase 5 | Pending |
-| AUDIT-05 | Phase 5 | Pending |
+| AUDIT-05 | Phase 5 | Complete |
 | CONFIG-01 | Phase 6 | Pending |
 | CONFIG-02 | Phase 6 | Pending |
 | CONFIG-03 | Phase 6 | Pending |
