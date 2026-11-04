@@ -313,7 +313,9 @@ def make_longitudinal_df(mlos_df: pd.DataFrame,
         col_name = f"Rule_{rn} | {check['QC Check']}"
         rule_cols.append(col_name)
         if "FAIL" in check["Status"] and not mlos_detail.empty:
-            failing_idx = set(mlos_detail.loc[mlos_detail["Rule#"] == rn].index)
+            # Rules 11 and 12 reuse one Rule# for several columns, so match on the rule name too
+            failing_idx = set(mlos_detail.loc[(mlos_detail["Rule#"] == rn) &
+                                              (mlos_detail["Rule"] == check["QC Check"])].index)
             result[col_name] = result["_orig_idx"].isin(failing_idx)
         else:
             result[col_name] = False
@@ -836,7 +838,10 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
         "timestamp", "eha_guid", "settlementarea_globalid",
     ] if c in mlos.columns]
     if _NOT_NULL_COLS:
-        _null_mask = mlos[_NOT_NULL_COLS].isnull().any(axis=1)
+        # Loaders use keep_default_na=False, so blank cells arrive as "" rather than NaN
+        _is_null = mlos[_NOT_NULL_COLS].isna() | mlos[_NOT_NULL_COLS].apply(
+            lambda s: s.astype(str).str.strip().eq(""))
+        _null_mask = _is_null.any(axis=1)
         _n1 = int(_null_mask.sum())
         checks.append({
             "Rule#": "1", "QC Check": "Required Fields — Not Null",
@@ -850,29 +855,29 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
             _sub1 = mlos[_null_mask][_cols1].copy()
             _sub1.insert(0, "Rule#", "1")
             _sub1.insert(1, "Rule", "Required Fields — Not Null")
-            _sub1["Null Fields"] = mlos[_null_mask][_NOT_NULL_COLS].apply(
-                lambda row: ", ".join(col for col in _NOT_NULL_COLS if pd.isna(row[col])),
+            _sub1["Null Fields"] = _is_null[_null_mask].apply(
+                lambda row: ", ".join(col for col in _NOT_NULL_COLS if row[col]),
                 axis=1,
             )
             details.append(_sub1)
 
     # R2 — Takeoffpoint Name Match
     if "takeoffpoint" in mlos.columns and "name" in takeoff.columns:
-        valid = set(takeoff["name"].dropna().str.strip())
+        valid = set(takeoff["name"].dropna().str.strip()) - {""}
         add("2", "Takeoffpoint Name Match",
             "takeoffpoint in MLoS must match name in Takeoffpoint table",
             ~mlos["takeoffpoint"].astype(str).str.strip().isin(valid), ["takeoffpoint"])
 
     # R3 — Takeoffpoint Code Match
     if "takeoffpoint_code" in mlos.columns and "code" in takeoff.columns:
-        valid = set(takeoff["code"].dropna().str.strip())
+        valid = set(takeoff["code"].dropna().str.strip()) - {""}
         add("3", "Takeoffpoint Code Match",
             "takeoffpoint_code in MLoS must match code in Takeoffpoint table",
             ~mlos["takeoffpoint_code"].astype(str).str.strip().isin(valid), ["takeoffpoint_code"])
 
     # R4 — Ward Code Match
     if "ward_code" in mlos.columns and "wardcode" in takeoff.columns:
-        valid = set(takeoff["wardcode"].dropna().str.strip())
+        valid = set(takeoff["wardcode"].dropna().str.strip()) - {""}
         add("4", "Ward Code Match",
             "ward_code in MLoS must match wardcode in Takeoffpoint table",
             ~mlos["ward_code"].astype(str).str.strip().isin(valid), ["ward_code"])
@@ -990,19 +995,19 @@ def run_takeoff_qc(takeoff: pd.DataFrame, mlos: pd.DataFrame):
     if "name" in takeoff.columns and "takeoffpoint" in mlos.columns:
         add("TP2","Name matches MLoS takeoffpoint",
             "name in Takeoffpoint must match takeoffpoint column in MLoS",
-            ~takeoff["name"].astype(str).str.strip().isin(set(mlos["takeoffpoint"].dropna().str.strip())),
+            ~takeoff["name"].astype(str).str.strip().isin((set(mlos["takeoffpoint"].dropna().str.strip()) - {""})),
             ["name"])
 
     if "code" in takeoff.columns and "takeoffpoint_code" in mlos.columns:
         add("TP3","Code matches MLoS takeoffpoint_code",
             "code in Takeoffpoint must match takeoffpoint_code in MLoS",
-            ~takeoff["code"].astype(str).str.strip().isin(set(mlos["takeoffpoint_code"].dropna().str.strip())),
+            ~takeoff["code"].astype(str).str.strip().isin((set(mlos["takeoffpoint_code"].dropna().str.strip()) - {""})),
             ["code"])
 
     if "wardcode" in takeoff.columns and "ward_code" in mlos.columns:
         add("TP4","wardcode matches MLoS ward_code",
             "wardcode in Takeoffpoint must match ward_code in MLoS",
-            ~takeoff["wardcode"].astype(str).str.strip().isin(set(mlos["ward_code"].dropna().str.strip())),
+            ~takeoff["wardcode"].astype(str).str.strip().isin((set(mlos["ward_code"].dropna().str.strip()) - {""})),
             ["wardcode"])
 
     if "globalid" in takeoff.columns:
@@ -1348,7 +1353,8 @@ filename = uploaded.name
 qc_cache_key = _current_key
 boundary_ref, boundary_bbox = load_boundary_refs()
 
-if st.session_state.get("qc_cache_key") == qc_cache_key:
+if (st.session_state.get("qc_cache_key") == qc_cache_key
+        and "mlos_df_corrected" in st.session_state):
     schema_checks      = st.session_state["schema_checks"]
     schema_detail      = st.session_state["schema_detail"]
     mlos_checks        = st.session_state["mlos_checks"]
@@ -1359,6 +1365,8 @@ if st.session_state.get("qc_cache_key") == qc_cache_key:
     tp_detail          = st.session_state["tp_detail"]
     boundary_checks    = st.session_state["boundary_checks"]
     boundary_detail    = st.session_state["boundary_detail"]
+    mlos_df            = st.session_state["mlos_df_corrected"]
+    _ac_log            = st.session_state["ac_log"]
     load_progress.progress(100)
 else:
     qc_bar = st.progress(0, text="⏳ Starting QC checks…")
@@ -1435,6 +1443,8 @@ else:
     st.session_state["tp_detail"]          = tp_detail
     st.session_state["boundary_checks"]    = boundary_checks
     st.session_state["boundary_detail"]    = boundary_detail
+    st.session_state["mlos_df_corrected"]  = mlos_df
+    st.session_state["ac_log"]             = _ac_log
 
 all_checks         = schema_checks + mlos_checks + settlement_checks + tp_checks + boundary_checks
 n_fail             = sum(1 for c in all_checks if "FAIL" in c["Status"])
@@ -1601,7 +1611,8 @@ with tab1:
     )
     st.markdown("---")
 
-    corrected_df, correction_log = auto_correct_mlos(mlos_df)
+    # mlos_df is already auto-corrected (pre-step); reuse its log instead of correcting twice
+    corrected_df, correction_log = mlos_df, _ac_log
 
     if not correction_log:
         st.success("✅ No corrections needed — all checked fields are already valid.")
@@ -1640,7 +1651,8 @@ with tab3:
         for check in mlos_checks:
             if "FAIL" not in check["Status"]: continue
             rn     = check["Rule#"]
-            subset = mlos_detail[mlos_detail["Rule#"] == rn].drop(columns=["Rule#","Rule"], errors="ignore")
+            subset = mlos_detail[(mlos_detail["Rule#"] == rn) &
+                                 (mlos_detail["Rule"] == check["QC Check"])].drop(columns=["Rule#","Rule"], errors="ignore")
             n      = len(subset)
             with st.expander(f"❌  Rule {rn} — {check['QC Check']}  ({n:,} row{'s' if n!=1 else ''})", expanded=False):
                 st.caption(f"📌 {check['Description']}")
