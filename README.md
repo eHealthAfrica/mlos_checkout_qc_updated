@@ -14,7 +14,7 @@ A Streamlit app for running automated Quality Control (QC) checks on MLOS (Maste
 - **4 QC Layers** run automatically on submission:
   - 🔎 **Schema Alignment** — verifies all required columns are present
   - 🏘️ **MLoS Rules** — data integrity checks, including takeoffpoint vs. health facility (Rules 1–12)
-  - 📐 **Settlement QC** — duplicate, coordinate, stacking, and proximity checks
+  - 📐 **Settlement QC** — duplicate, coordinate, stacking, proximity, and settlement extent checks
   - 🗺️ **Boundary Checks** — null ward code detection, ward code existence, ward code vs. ward boundary polygon (spatial join), and state name validation against the 9,406-ward admin boundary reference (Sept 2026)
 - **Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score** displayed on the dashboard
 - Per-rule issue drilldown with expandable row-level detail tables
@@ -45,7 +45,7 @@ All formats get the same full set of checks.
 | 🔧 Auto Correct | Correction log + full corrected MLoS download (always available) |
 | 📊 QC Summary | Weighted QC Score breakdown, pass/fail per rule, failing row counts, Pass Rate %, Fail Rate % |
 | 🏘️ MLoS Issues | Row-level drilldown per failing rule + Longitudinal View (Yes/No per rule) |
-| 📐 Settlement QC | Row-level drilldown for each failing settlement check (duplicates, coordinates, proximity) + download |
+| 📐 Settlement QC | Row-level drilldown for each failing settlement check (duplicates, coordinates, proximity, settlement extent) + download |
 | 🗺️ Boundary Issues | Null/missing ward codes (B0), unmatched ward codes (B1), ward code vs. spatially-joined boundary ward mismatches (B2), state name mismatches (B3), with boundary reference comparison columns |
 | 🔍 Raw Data | Filterable view of the full MLoS dataset |
 | 📄 Generate Report | Full QC verdict, Excel report download, and Send Email button |
@@ -111,8 +111,8 @@ Checks whether the uploaded file contains all required columns. Schema failures 
 | `settlement_name` | Settlement name | Base identifier, Rule 1 |
 | `primarysettlement_name` | Primary settlement name | Nullable (can be null) |
 | `alternate_name` | Alternate settlement name | Nullable (can be null) |
-| `latitude` | GPS latitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, B2 |
-| `longitude` | GPS longitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, B2 |
+| `latitude` | GPS latitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, SQ6, B2 |
+| `longitude` | GPS longitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, SQ6, B2 |
 | `security_compromised` | Y or N | Rules 1, 3 |
 | `accessibility_status` | Fully Accessible / Partially Accessible / Inaccessible | Rules 1, 4, 5 |
 | `reasons_for_inaccessibility` | Reason text | Rule 5, Auto Correct (Nullable — can be null for Fully Accessible settlements) |
@@ -182,7 +182,7 @@ So `PHC Ojede` matches `Ojede Primary Health Center`. Failing rows get a **Close
 
 ---
 
-### 5. Settlement QC Checks (Rules SQ1–SQ5)
+### 5. Settlement QC Checks (Rules SQ1–SQ6)
 
 Spatial integrity checks applied to the MLoS settlement records.
 
@@ -194,8 +194,11 @@ Spatial integrity checks applied to the MLoS settlement records.
 | SQ3 | Stacked Coordinates | No two settlements may share identical `latitude`/`longitude` coordinates |
 | SQ4 | Settlements Too Close (< 20 m) | Nearest other settlement is less than 20 metres away (Haversine distance) |
 | SQ5 | Settlements Too Close (20–30 m) | Nearest other settlement is 20–30 metres away (Haversine distance) |
+| SQ6 | Not on Settlement Extent (> 50 m) | Settlement point must be on, or within 50 metres of, a GRID3 settlement extent |
 
 SQ4 and SQ5 rows are banded by each settlement's nearest neighbour, so a row appears in only one of them. Their detail rows include `Cluster ID` / `Cluster Size` (settlements linked by < 30 m pairs), `Nearest Settlement` and `Nearest Distance (m)`.
+
+SQ6 flags points that sit away from any mapped buildings, which usually means a misplaced coordinate or a point captured off-site. It uses the GRID3 Nigeria settlement extents v4.1 (Built-up Area, Small Settlement Area, Hamlet) rasterised to a 25 m grid, so distances are accurate to about one cell (the grid is slightly lenient: a cell counts if any part of an extent touches it). SQ6 detail rows add `Nearest Extent (m)` — distance to the nearest extent within 500 m, or `> 500` — and `Nearest Extent Type`. Rows without valid coordinates are left to SQ2/SQ2b.
 
 ---
 
@@ -230,8 +233,9 @@ Reference files bundled in the repo:
 - `health_facility_ref.csv.gz` — 51,201 health facilities (`ward_code`, `primary_name`, `alternate_name`, `globalid`) across 8,912 wards, from `health_facilities.sqlite` — used by MLoS Rule 2
 - `ward_boundary_ref.csv` — 9,406 ward codes with state, LGA, and ward metadata (source: `ward_boundary_sept.sqlite`, Sept 2026)
 - `ward_boundary_geom.csv.gz` — 9,305 ward boundary polygons (WKB hex, EPSG:4326) per ward code, used for the B2 spatial join
+- `settlement_extent_mask.npz` — GRID3 Nigeria settlement extents v4.1 (2.55 M blocks, from `settlement_extent.gpkg`) rasterised to a 25 m EPSG:3857 grid by `scripts/build_extent_mask.py` (build-time only; needs `rasterio` and `pyogrio`); cell values 0 none, 1 Hamlet, 2 Small Settlement Area, 3 Built-up Area, stored as zlib-compressed 256×256 tiles (2 bits per cell, empty tiles dropped) — used by SQ6
 
-Both files are generated from the `ward_boundary_sept` table in `ward_boundary_sept.sqlite` (SpatiaLite). In the Sept 2026 release, ward codes for the northern states moved from numeric (e.g. `10101`) to alphanumeric (e.g. `BASALK01`), and some LGA codes changed along with their ward codes — so an LGA code does not always match the first 6 characters of its ward codes. Wards of every status (including `Invalid`) are included; duplicate ward codes are merged into one entry.
+The two ward files are generated from the `ward_boundary_sept` table in `ward_boundary_sept.sqlite` (SpatiaLite). In the Sept 2026 release, ward codes for the northern states moved from numeric (e.g. `10101`) to alphanumeric (e.g. `BASALK01`), and some LGA codes changed along with their ward codes — so an LGA code does not always match the first 6 characters of its ward codes. Wards of every status (including `Invalid`) are included; duplicate ward codes are merged into one entry.
 
 ---
 

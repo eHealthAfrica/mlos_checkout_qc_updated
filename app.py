@@ -7,6 +7,7 @@ import tempfile
 import os
 import re
 import difflib
+import zlib
 from io import BytesIO
 from datetime import datetime
 import openpyxl
@@ -353,6 +354,95 @@ def load_ward_geoms():
     shapely.prepare(geom_df["geometry"].values)
     return geom_df
 
+# ─── Settlement Extent Reference (GRID3 v4.1) ──────────────────────────────────
+# GRID3 Nigeria settlement extents rasterised to a 25 m Web Mercator grid, stored as
+# zlib-compressed 256×256 tiles (2 bits per cell). Cell values index EXTENT_TYPES.
+SETTLEMENT_EXTENT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settlement_extent_mask.npz")
+EXTENT_TYPES = np.array(["", "Hamlet", "Small Settlement Area", "Built-up Area"])
+EXTENT_BUFFER_M = 50     # a settlement must be on, or within this distance of, an extent
+EXTENT_SEARCH_M = 500    # how far to look when reporting the nearest extent for failures
+
+class SettlementExtentMask:
+    def __init__(self, path):
+        z = np.load(path)
+        self.x0, self.y1, self.res, tile, self.tx, self.ty = z["meta"]
+        self.tile = int(tile)
+        self.tx, self.ty = int(self.tx), int(self.ty)
+        offsets = z["offsets"]
+        self.index = {int(k): (offsets[i], offsets[i + 1]) for i, k in enumerate(z["keys"])}
+        self.data  = z["data"].tobytes()
+        self.cache = {}
+
+    def _tile(self, key):
+        if key not in self.cache:
+            if key not in self.index:
+                self.cache[key] = None
+            else:
+                a, b = self.index[key]
+                p = np.frombuffer(zlib.decompress(self.data[a:b]), dtype=np.uint8)
+                p = p.reshape(self.tile, self.tile // 4)
+                self.cache[key] = np.stack([(p >> s) & 3 for s in (0, 2, 4, 6)], axis=-1
+                                           ).reshape(self.tile, self.tile)
+        return self.cache[key]
+
+    def cells(self, lat, lon):
+        """Grid row/column of each WGS84 point."""
+        R = 6378137.0
+        x = R * np.radians(lon)
+        y = R * np.log(np.tan(np.pi / 4 + np.radians(lat) / 2))
+        return (np.floor((self.y1 - y) / self.res).astype(np.int64),
+                np.floor((x - self.x0) / self.res).astype(np.int64))
+
+    def lookup(self, rows, cols):
+        """Extent type code (0–3) at each grid cell; 0 outside the grid."""
+        out = np.zeros(rows.shape, dtype=np.uint8)
+        T = self.tile
+        inside = (rows >= 0) & (cols >= 0) & (rows < self.ty * T) & (cols < self.tx * T)
+        r, c = rows[inside], cols[inside]
+        key = (r // T) * self.tx + c // T
+        vals = np.zeros(len(r), dtype=np.uint8)
+        order = np.argsort(key, kind="stable")
+        uk, starts = np.unique(key[order], return_index=True)
+        for k, idx in zip(uk, np.split(order, starts[1:])):
+            t = self._tile(int(k))
+            if t is not None:
+                vals[idx] = t[r[idx] % T, c[idx] % T]
+        out[inside] = vals
+        return out
+
+    def nearest(self, lat, lon, radius_m):
+        """Distance (m, cell precision) to and type of the nearest extent cell within
+        radius_m of each point; inf / 0 where none."""
+        rows, cols = self.cells(lat, lon)
+        scale = self.res * np.cos(np.radians(lat))          # ground metres per cell
+        n = int(np.ceil(radius_m / scale.min())) if len(lat) else 0
+        dy, dx = np.mgrid[-n:n + 1, -n:n + 1]
+        dy, dx = dy.ravel(), dx.ravel()
+        cell_d = np.hypot(dy, dx)
+        order = np.argsort(cell_d, kind="stable")
+        dy, dx, cell_d = dy[order], dx[order], cell_d[order]
+        best_d = np.full(len(lat), np.inf)
+        best_t = np.zeros(len(lat), dtype=np.uint8)
+        todo = np.arange(len(lat))
+        for oy, ox, cd in zip(dy, dx, cell_d):
+            if not len(todo):
+                break
+            d = cd * scale[todo]
+            within = d <= radius_m
+            todo = todo[within]
+            if not len(todo):
+                continue
+            t = self.lookup(rows[todo] + oy, cols[todo] + ox)
+            hit = t > 0
+            best_d[todo[hit]] = cd * scale[todo[hit]]
+            best_t[todo[hit]] = t[hit]
+            todo = todo[~hit]
+        return best_d, best_t
+
+@st.cache_resource(show_spinner=False)
+def load_settlement_extents():
+    return SettlementExtentMask(SETTLEMENT_EXTENT_PATH) if os.path.exists(SETTLEMENT_EXTENT_PATH) else None
+
 # ─── Health Facility Reference (takeoffpoints) ──────────────────────────────────
 HEALTH_FACILITY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "health_facility_ref.csv.gz")
 
@@ -552,7 +642,7 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, geom_df: pd.D
     return checks, detail_df
 
 # ─── QC Engine — Settlement ──────────────────────────────────────────────────────
-def run_settlement_qc(mlos: pd.DataFrame):
+def run_settlement_qc(mlos: pd.DataFrame, extents=None):
     import numpy as np
     checks, details = [], []
     total  = len(mlos)
@@ -682,6 +772,26 @@ def run_settlement_qc(mlos: pd.DataFrame):
         add_proximity("SQ5", "Settlements Too Close (20–30 m)",
             "nearest other settlement is between 20 and 30 metres away",
             (nearest_d >= 20) & (nearest_d < 30))
+
+    # SQ6 — settlement must sit on, or within EXTENT_BUFFER_M of, a GRID3 settlement
+    # extent. Points off any extent are likely misplaced or in empty land.
+    if extents is not None and "latitude" in mlos.columns and "longitude" in mlos.columns:
+        lat   = pd.to_numeric(mlos["latitude"],  errors="coerce").values
+        lon   = pd.to_numeric(mlos["longitude"], errors="coerce").values
+        valid = np.flatnonzero(~np.isnan(lat) & ~np.isnan(lon) & (lat != 0) & (lon != 0))
+        ext_d, _ = extents.nearest(lat[valid], lon[valid], EXTENT_BUFFER_M)
+        fail = np.zeros(len(mlos), dtype=bool)
+        fail[valid[np.isinf(ext_d)]] = True
+        add("SQ6", f"Not on Settlement Extent (> {EXTENT_BUFFER_M} m)",
+            f"settlement point is more than {EXTENT_BUFFER_M} metres from any GRID3 settlement extent",
+            pd.Series(fail, index=mlos.index),
+            ["ward_code", "settlement_name", "latitude", "longitude"])
+        if fail.any():
+            pos = np.flatnonzero(fail)
+            far_d, far_t = extents.nearest(lat[pos], lon[pos], EXTENT_SEARCH_M)
+            details[-1]["Nearest Extent (m)"] = [f"> {EXTENT_SEARCH_M}" if np.isinf(d) else int(round(d, -1))
+                                                 for d in far_d]
+            details[-1]["Nearest Extent Type"] = EXTENT_TYPES[far_t]
 
     return checks, pd.concat(details) if details else pd.DataFrame()
 
@@ -1220,6 +1330,7 @@ with st.sidebar:
 | SQ3 | No two settlements may share identical coordinates (stacked) |
 | SQ4 | Nearest other settlement must not be < 20 m away (proximity cluster) |
 | SQ5 | Nearest other settlement must not be 20–30 m away (proximity cluster) |
+| SQ6 | Settlement must be on, or within 50 m of, a GRID3 settlement extent |
         """)
     with st.expander("🗺️ Boundary Check Rules", expanded=False):
         st.markdown("""
@@ -1258,7 +1369,7 @@ Takeoffpoints are checked against the bundled health facility reference — no s
 **QC Layers:**
 - 🔎 **Schema Alignment** (S1) — verifies all required columns are present
 - 🏘️ **MLoS Rules** (1–12) — data integrity checks, including takeoffpoint vs. health facility
-- 📐 **Settlement QC** (SQ1–SQ5) — duplicate, coordinate, stacking, and proximity checks
+- 📐 **Settlement QC** (SQ1–SQ6) — duplicate, coordinate, stacking, proximity, and settlement extent checks
 - 🗺️ **Boundary Checks** (B0–B3) — ward code, spatial ward match, and state name validation against admin boundary reference
 
 **Outputs:**
@@ -1292,6 +1403,7 @@ qc_cache_key = _current_key
 boundary_ref = load_boundary_refs()
 boundary_geom = load_ward_geoms()
 hf_by_ward = load_health_facilities()
+settlement_extents = load_settlement_extents()
 
 if (st.session_state.get("qc_cache_key") == qc_cache_key
         and "mlos_df_corrected" in st.session_state):
@@ -1340,7 +1452,7 @@ else:
         # ── Step 3 / 4: Settlement QC ────────────────────────────────────
         qc_bar.progress(51, text="📐 Step 3 / 4 — Settlement QC…")
         st.write("📐 Step 3 / 4 — Settlement QC")
-        settlement_checks, settlement_detail = run_settlement_qc(mlos_df)
+        settlement_checks, settlement_detail = run_settlement_qc(mlos_df, settlement_extents)
         sq_fail = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if sq_fail else '✅'} Settlement: "
                  f"{len(settlement_checks) - sq_fail}/{len(settlement_checks)} checks passed")
