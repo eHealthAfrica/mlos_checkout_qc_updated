@@ -235,6 +235,8 @@ Reference files bundled in the repo:
 - `ward_boundary_geom.csv.gz` — 9,305 ward boundary polygons (WKB hex, EPSG:4326) per ward code, used for the B2 spatial join
 - `settlement_extent_mask.npz` — GRID3 Nigeria settlement extents v4.1 (2.55 M blocks, from `settlement_extent.gpkg`) rasterised to a 25 m EPSG:3857 grid by `scripts/build_extent_mask.py` (build-time only; needs `rasterio` and `pyogrio`); cell values 0 none, 1 Hamlet, 2 Small Settlement Area, 3 Built-up Area, stored as zlib-compressed 256×256 tiles (2 bits per cell, empty tiles dropped) — used by SQ6
 
+Each reference file is rebuilt by a script in `scripts/` (usage is in each script's docstring): `build_ward_ref.py`, `build_ward_geom.py`, `build_hf_ref.py` and `build_extent_mask.py`.
+
 The two ward files are generated from the `ward_boundary_sept` table in `ward_boundary_sept.sqlite` (SpatiaLite). In the Sept 2026 release, ward codes for the northern states moved from numeric (e.g. `10101`) to alphanumeric (e.g. `BASALK01`), and some LGA codes changed along with their ward codes — so an LGA code does not always match the first 6 characters of its ward codes. Wards of every status (including `Invalid`) are included; duplicate ward codes are merged into one entry.
 
 ---
