@@ -1,9 +1,12 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import numpy as np
+import shapely
 import tempfile
 import os
 import re
+import difflib
 from io import BytesIO
 from datetime import datetime
 import openpyxl
@@ -86,7 +89,6 @@ st.markdown("""
 
 # ─── Constants ───────────────────────────────────────────────────────────────────
 MLOS_VIEW    = "master_list_settlement_update_view"
-TAKEOFF_VIEW = "mlos_takeoffpoint_view"
 
 VALID_DAY   = {"1","1_2","1_2_3","1_2_3_4","2","2_3","2_3_4","3","3_4","4","NA"}
 VALID_YN_NA = {"Y","N","NA"}
@@ -118,18 +120,16 @@ def load_view(conn, view_name):
     return pd.read_sql_query(f'SELECT {col_str} FROM "{view_name}"', conn)
 
 def load_csv(uploaded_file):
-    """Load a CSV file as the MLoS table. Returns (mlos_df, empty takeoff_df)."""
+    """Load a CSV file as the MLoS table."""
     uploaded_file.seek(0)
     # keep_default_na=False prevents pandas from silently converting the valid
     # domain value "NA" (used in flag columns like highrisk, slums, etc.) to NaN.
     # Only truly empty cells remain as NaN.
-    mlos_df = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
-    takeoff_df = pd.DataFrame()
-    return mlos_df, takeoff_df
+    return pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
 
 def load_xlsx(uploaded_file):
-    """Load an XLSX/XLS file. Expects two sheets: mlos (sheet 1) and takeoffpoint (sheet 2).
-    Sheet names may match the view names or simplified aliases."""
+    """Load an XLSX/XLS file. Uses the sheet named after the MLoS view (or an alias),
+    falling back to the first sheet."""
     uploaded_file.seek(0)
     xl = pd.ExcelFile(uploaded_file)
     sheet_names = xl.sheet_names
@@ -141,25 +141,16 @@ def load_xlsx(uploaded_file):
         sheet_names[0]
     )
 
-    # Resolve takeoff sheet — prefer view name, then 'takeoffpoint', then second sheet
-    takeoff_aliases = {TAKEOFF_VIEW.lower(), "takeoffpoint", "takeoff", "takeoff_point"}
-    takeoff_sheet = next(
-        (s for s in sheet_names if s.lower() in takeoff_aliases and s != mlos_sheet),
-        sheet_names[1] if len(sheet_names) > 1 else None
-    )
-
     # keep_default_na=False prevents pandas from converting the valid domain value
     # "NA" (used in flag columns) to NaN. Only truly empty cells remain as NaN.
-    mlos_df    = xl.parse(mlos_sheet,   dtype=str, keep_default_na=False)
-    takeoff_df = xl.parse(takeoff_sheet, dtype=str, keep_default_na=False) if takeoff_sheet else pd.DataFrame()
-    return mlos_df, takeoff_df
+    return xl.parse(mlos_sheet, dtype=str, keep_default_na=False)
 
 def get_uploaded_data(uploaded_file, progress=None):
     cache_key = (uploaded_file.name, getattr(uploaded_file, "size", None))
     if st.session_state.get("uploaded_cache_key") == cache_key:
         if progress is not None:
             progress.progress(100)
-        return st.session_state["mlos_df"], st.session_state["takeoff_df"]
+        return st.session_state["mlos_df"]
 
     if progress is not None:
         progress.progress(10)
@@ -169,13 +160,13 @@ def get_uploaded_data(uploaded_file, progress=None):
     if ext in ("xlsx", "xls"):
         if progress is not None:
             progress.progress(35)
-        mlos_df, takeoff_df = load_xlsx(uploaded_file)
+        mlos_df = load_xlsx(uploaded_file)
         if progress is not None:
             progress.progress(90)
     elif ext == "csv":
         if progress is not None:
             progress.progress(35)
-        mlos_df, takeoff_df = load_csv(uploaded_file)
+        mlos_df = load_csv(uploaded_file)
         if progress is not None:
             progress.progress(90)
     else:
@@ -183,10 +174,7 @@ def get_uploaded_data(uploaded_file, progress=None):
         try:
             if progress is not None:
                 progress.progress(35)
-            mlos_df    = load_view(conn, MLOS_VIEW)
-            if progress is not None:
-                progress.progress(65)
-            takeoff_df = load_view(conn, TAKEOFF_VIEW)
+            mlos_df = load_view(conn, MLOS_VIEW)
             if progress is not None:
                 progress.progress(90)
         finally:
@@ -198,10 +186,9 @@ def get_uploaded_data(uploaded_file, progress=None):
 
     st.session_state["uploaded_cache_key"] = cache_key
     st.session_state["mlos_df"] = mlos_df
-    st.session_state["takeoff_df"] = takeoff_df
     if progress is not None:
         progress.progress(100)
-    return mlos_df, takeoff_df
+    return mlos_df
 
 
 def pct(v, t): return f"{v/t*100:.1f}%" if t else "0%"
@@ -227,9 +214,8 @@ MLOS_REQUIRED_COLS = {
     "riverine", "fulani", "timestamp", "source", "last_updated", "editor",
     "validation_status", "master_id", "mlos_id", "eha_guid", "settlementarea_globalid",
 }
-TAKEOFF_REQUIRED_COLS = {"name", "code", "wardcode", "globalid"}
 
-def run_schema_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
+def run_schema_qc(mlos: pd.DataFrame):
     """
     Schema alignment QC — checks required columns are present.
     Returns check entries (same format as run_mlos_qc) and a detail DataFrame.
@@ -254,25 +240,6 @@ def run_schema_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
             "Table": "MLoS", "Missing Column": col,
             "Impact": "QC rule(s) referencing this column will be skipped or may return incorrect results",
         } for col in missing_mlos]))
-
-    if not takeoff.empty and len(takeoff.columns) > 0:
-        tp_cols    = set(takeoff.columns.str.strip().str.lower())
-        missing_tp = sorted(TAKEOFF_REQUIRED_COLS - tp_cols)
-        n_tp_total = len(TAKEOFF_REQUIRED_COLS)
-        n_tp_miss  = len(missing_tp)
-        checks.append({
-            "Rule#": "S2", "QC Check": "Takeoffpoint Schema Alignment",
-            "Description": f"{n_tp_total - n_tp_miss}/{n_tp_total} required Takeoffpoint columns present",
-            "Failing Rows": n_tp_miss, "Total Rows": n_tp_total,
-            "Fail %": pct(n_tp_miss, n_tp_total),
-            "Status": "❌ FAIL" if n_tp_miss else "✅ PASS",
-        })
-        if missing_tp:
-            details.append(pd.DataFrame([{
-                "Rule#": "S2", "Rule": "Takeoffpoint Schema Alignment",
-                "Table": "Takeoffpoint", "Missing Column": col,
-                "Impact": "QC rule(s) referencing this column will be skipped or may return incorrect results",
-            } for col in missing_tp]))
 
     schema_detail = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
     return checks, schema_detail
@@ -367,22 +334,85 @@ def build_longitudinal_mlos(mlos_df: pd.DataFrame,
 
 # ─── Boundary Reference Loading ──────────────────────────────────────────────────
 BOUNDARY_REF_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward_boundary_ref.csv")
-BOUNDARY_BBOX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward_boundary_bbox.csv")
+BOUNDARY_GEOM_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward_boundary_geom.csv.gz")
 
 @st.cache_data(show_spinner=False)
 def load_boundary_refs():
-    """Load ward code reference and bounding box lookup tables."""
+    """Load ward code reference lookup table."""
     # keep_default_na=False prevents pandas from converting the string "NA"
     # (the state_code for Nasarawa) into NaN, which would break state filtering.
-    ref_df  = pd.read_csv(BOUNDARY_REF_PATH,  dtype=str, keep_default_na=False) if os.path.exists(BOUNDARY_REF_PATH)  else pd.DataFrame()
-    bbox_df = pd.read_csv(BOUNDARY_BBOX_PATH, dtype=str, keep_default_na=False) if os.path.exists(BOUNDARY_BBOX_PATH) else pd.DataFrame()
-    for col in ["min_lon","min_lat","max_lon","max_lat"]:
-        if col in bbox_df.columns:
-            bbox_df[col] = pd.to_numeric(bbox_df[col], errors="coerce")
-    return ref_df, bbox_df
+    return pd.read_csv(BOUNDARY_REF_PATH, dtype=str, keep_default_na=False) if os.path.exists(BOUNDARY_REF_PATH) else pd.DataFrame()
+
+@st.cache_resource(show_spinner=False)
+def load_ward_geoms():
+    """Load ward boundary polygons (WGS84) as ward_code + shapely geometry."""
+    if not os.path.exists(BOUNDARY_GEOM_PATH):
+        return pd.DataFrame(columns=["ward_code", "geometry"])
+    geom_df = pd.read_csv(BOUNDARY_GEOM_PATH, dtype=str, keep_default_na=False)
+    geom_df["geometry"] = shapely.from_wkb(geom_df.pop("wkb").values)
+    shapely.prepare(geom_df["geometry"].values)
+    return geom_df
+
+# ─── Health Facility Reference (takeoffpoints) ──────────────────────────────────
+HEALTH_FACILITY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "health_facility_ref.csv.gz")
+
+# Facility-type abbreviations expanded before comparison, and generic facility-type
+# words ignored, so "PHC Ojede" and "Ojede Primary Health Center" compare equal.
+HF_ABBREV = {"phc": "primary health centre", "phcc": "primary health centre",
+             "bhc": "basic health centre", "chc": "comprehensive health centre",
+             "hc": "health centre", "hp": "health post", "gh": "general hospital",
+             "mch": "maternal child health", "fmc": "federal medical centre",
+             "pry": "primary", "primry": "primary", "dispensari": "dispensary"}
+HF_GENERIC = {"primary", "health", "centre", "center", "centerc", "care", "clinic", "clinics",
+              "post", "basic", "comprehensive", "general", "hospital", "dispensary", "model",
+              "cottage", "maternity", "maternal", "child", "and", "of", "the", "ward",
+              "federal", "medical", "specialist", "facility"}
+HF_NUMERAL = re.compile(r"^(\d+|i{1,3}|iv|v|vi{1,3}|ix|x)$")
+HF_FUZZY_THRESHOLD = 0.8
+
+def facility_key(name):
+    """Distinctive part of a facility name: (sorted place-name words, numerals like II/IV)."""
+    words = []
+    for w in re.sub(r"[^a-z0-9 ]", " ", str(name).lower()).split():
+        words.extend(HF_ABBREV.get(w, w).split())
+    core = [w for w in words if w not in HF_GENERIC]
+    nums = frozenset(w for w in core if HF_NUMERAL.match(w))
+    return " ".join(sorted(w for w in core if not HF_NUMERAL.match(w))), nums
+
+def same_facility(a, b):
+    """Place-name words equal or near-identical (spelling variants); numerals must match exactly."""
+    (ta, na), (tb, nb) = a, b
+    if not ta or not tb or na != nb:
+        return False
+    return ta == tb or difflib.SequenceMatcher(None, ta, tb).ratio() >= HF_FUZZY_THRESHOLD
+
+@st.cache_resource(show_spinner=False)
+def load_health_facilities():
+    """ward_code -> list of (facility_key, facility name), from primary and alternate names."""
+    if not os.path.exists(HEALTH_FACILITY_PATH):
+        return {}
+    hf = pd.read_csv(HEALTH_FACILITY_PATH, dtype=str, keep_default_na=False)
+    by_ward = {}
+    for col in ["primary_name", "alternate_name"]:
+        for wc, name in hf.loc[hf[col].str.strip() != "", ["ward_code", col]].values:
+            by_ward.setdefault(wc.strip(), []).append((facility_key(name), name.strip()))
+    return by_ward
+
+def match_takeoffpoint(ward_code, takeoffpoint, hf_by_ward):
+    """Return (matched, note); note names the closest facilities in the ward when unmatched."""
+    if not takeoffpoint:
+        return False, "No takeoffpoint given"
+    facilities = hf_by_ward.get(ward_code, [])
+    key = facility_key(takeoffpoint)
+    if any(same_facility(key, k) for k, _ in facilities):
+        return True, ""
+    if not facilities:
+        return False, "No health facility in this ward"
+    ranked = sorted(facilities, key=lambda f: -difflib.SequenceMatcher(None, key[0], f[0][0]).ratio())
+    return False, "; ".join(list(dict.fromkeys(n for _, n in ranked))[:3])
 
 # ─── QC Engine — Ward Boundary ───────────────────────────────────────────────────
-def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.DataFrame):
+def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, geom_df: pd.DataFrame):
     checks, details = [], []
     total = len(mlos)
 
@@ -418,7 +448,6 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.D
     # This replaces state_code filtering which caused false positives because
     # "NA" (Nasarawa's code) is silently converted to NaN by pandas.
     filtered_ref  = ref_df.copy()  if not ref_df.empty  else ref_df
-    filtered_bbox = bbox_df.copy() if not bbox_df.empty else bbox_df
 
     if (not ref_df.empty
             and "state_name" in mlos.columns
@@ -429,16 +458,9 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.D
         ref_sn_norm  = ref_df["state_name"].astype(str).str.strip().str.lower()
         filtered_ref = filtered_ref[ref_sn_norm.isin(mlos_state_names)]
 
-        if not filtered_ref.empty and not filtered_bbox.empty and "ward_code" in filtered_bbox.columns:
-            state_ward_set = set(filtered_ref["ward_code"].dropna().astype(str).str.strip())
-            filtered_bbox  = filtered_bbox[
-                filtered_bbox["ward_code"].astype(str).str.strip().isin(state_ward_set)
-            ]
-
     # Fallback to full reference if state_name filtering yields nothing
     if filtered_ref.empty and not ref_df.empty:
         filtered_ref  = ref_df.copy()
-        filtered_bbox = bbox_df.copy()
 
     # B0 — ward_code must not be null or empty in the uploaded data
     null_wc_mask = mlos["ward_code"].isna() | mlos["ward_code"].astype(str).str.strip().eq("")
@@ -483,56 +505,48 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, bbox_df: pd.D
             "state_name in MLoS must match the state_name assigned to the ward_code in the boundary reference",
             mask_b3, ["ward_code", "state_name"])
 
-    # B2 — lat/lon must fall within the state-filtered bounding box
-    if (not filtered_bbox.empty and "ward_code" in filtered_bbox.columns
-            and "latitude" in mlos.columns and "longitude" in mlos.columns):
-        chk = pd.DataFrame({
-            "ward_code": mlos["ward_code"].astype(str).str.strip().values,
-            "lat":       pd.to_numeric(mlos["latitude"],  errors="coerce").values,
-            "lon":       pd.to_numeric(mlos["longitude"], errors="coerce").values,
-        }, index=mlos.index)
+    # B2 — spatial join: the ward_code of the boundary polygon each point falls in
+    # must equal the ward_code on the settlement. Rows are skipped only when the
+    # point falls in no ward AND the declared ward has no polygon to compare against.
+    if not geom_df.empty and "latitude" in mlos.columns and "longitude" in mlos.columns:
+        wc  = mlos["ward_code"].astype(str).str.strip().values
+        lat = pd.to_numeric(mlos["latitude"],  errors="coerce").values
+        lon = pd.to_numeric(mlos["longitude"], errors="coerce").values
 
-        bbox_ref = filtered_bbox[["ward_code","min_lon","min_lat","max_lon","max_lat"]].copy()
-        for col in ["min_lon","min_lat","max_lon","max_lat"]:
-            bbox_ref[col] = pd.to_numeric(bbox_ref[col], errors="coerce")
+        check_pos = np.flatnonzero(~np.isnan(lat) & ~np.isnan(lon) & (lat != 0) & (lon != 0))
+        points    = shapely.points(lon[check_pos], lat[check_pos])
+        tree      = shapely.STRtree(geom_df["geometry"].values)
+        pt_idx, ward_idx = tree.query(points, predicate="intersects")
+        codes = geom_df["ward_code"].values
+        hits  = {}
+        for pi, wi in zip(pt_idx, ward_idx):
+            hits.setdefault(pi, []).append(codes[wi])
 
-        merged = chk.merge(bbox_ref, on="ward_code", how="left")
-        merged.index = mlos.index
+        has_polygon = set(codes)
+        fail   = np.zeros(len(mlos), dtype=bool)
+        joined = {}
+        for i, pos in enumerate(check_pos):
+            found = hits.get(i, [])
+            if wc[pos] in found or (not found and wc[pos] not in has_polygon):
+                continue
+            fail[pos]   = True
+            joined[pos] = found
 
-        has_coords   = merged["lat"].notna() & merged["lon"].notna() & (merged["lat"] != 0) & (merged["lon"] != 0)
-        in_reference = merged["min_lon"].notna()
-        out_of_box   = (
-            (merged["lon"] < merged["min_lon"]) |
-            (merged["lon"] > merged["max_lon"]) |
-            (merged["lat"] < merged["min_lat"]) |
-            (merged["lat"] > merged["max_lat"])
-        )
-        mask_b2 = has_coords & in_reference & out_of_box
-        add("B2", "Coordinates — Ward Boundary Intersection",
-            "latitude/longitude must fall within the bounding box of the declared ward_code "
-            "(ward_code of the intersecting boundary must equal the declared ward_code)",
+        mask_b2 = pd.Series(fail, index=mlos.index)
+        add("B2", "Ward Code — Boundary Spatial Match",
+            "ward_code must match the ward_code of the ward boundary polygon the latitude/longitude falls in",
             mask_b2, ["ward_code","latitude","longitude"])
 
-        # Enrich B2 detail with reverse-lookup: which ward bbox contains the failing coordinate
         if mask_b2.any() and details:
-            _b2_detail = details[-1]
-            _bbox_lkp = filtered_bbox[["ward_code","min_lon","min_lat","max_lon","max_lat"]].copy()
-            for _c in ["min_lon","min_lat","max_lon","max_lat"]:
-                _bbox_lkp[_c] = pd.to_numeric(_bbox_lkp[_c], errors="coerce")
-            _bbox_lkp = _bbox_lkp.dropna()
-            _matched = []
-            for _idx in mask_b2[mask_b2].index:
-                _lv = pd.to_numeric(mlos.at[_idx, "latitude"],  errors="coerce")
-                _lnv = pd.to_numeric(mlos.at[_idx, "longitude"], errors="coerce")
-                if pd.isna(_lv) or pd.isna(_lnv):
-                    _matched.append("N/A")
-                    continue
-                _hits = _bbox_lkp[
-                    (_bbox_lkp["min_lon"] <= _lnv) & (_lnv <= _bbox_lkp["max_lon"]) &
-                    (_bbox_lkp["min_lat"] <= _lv)  & (_lv  <= _bbox_lkp["max_lat"])
-                ]["ward_code"].astype(str).tolist()
-                _matched.append(", ".join(_hits[:5]) if _hits else "No matching ward found")
-            _b2_detail["Intersecting Ward(s) from Boundary"] = _matched
+            ward_names = (dict(zip(ref_df["ward_code"], ref_df["ward_name"]))
+                          if {"ward_code","ward_name"} <= set(ref_df.columns) else {})
+            found_lists = [joined[pos] for pos in np.flatnonzero(fail)]
+            details[-1]["Boundary Ward Code"] = [
+                ", ".join(f[:5]) if f else "No ward found at coordinates" for f in found_lists
+            ]
+            details[-1]["Boundary Ward Name"] = [
+                ", ".join(ward_names.get(c, "") for c in f[:5]) for f in found_lists
+            ]
 
     detail_df = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
     return checks, detail_df
@@ -559,12 +573,16 @@ def run_settlement_qc(mlos: pd.DataFrame):
             sub.insert(1, "Rule", rule)
             details.append(sub)
 
-    # SQ1 — settlement_name must be unique within each ward_code
+    # SQ1 — settlement_name must be unique within each ward_code. Names are compared
+    # ignoring case and extra whitespace; blank names are left to Rule 1 (NOT NULL).
     if "settlement_name" in mlos.columns and "ward_code" in mlos.columns:
+        sn_norm = (mlos["settlement_name"].fillna("").astype(str)
+                   .str.strip().str.lower().str.replace(r"\s+", " ", regex=True))
+        wc_norm = mlos["ward_code"].fillna("").astype(str).str.strip()
+        dup = pd.DataFrame({"wc": wc_norm, "sn": sn_norm}).duplicated(keep=False) & sn_norm.ne("")
         add("SQ1", "Duplicate Settlement Name in Ward",
-            "settlement_name must not repeat within the same ward_code",
-            mlos.duplicated(subset=["ward_code", "settlement_name"], keep=False),
-            ["ward_code", "settlement_name"])
+            "settlement_name must be unique within each ward_code (case and extra spaces ignored)",
+            dup, ["ward_code", "settlement_name"])
 
     # SQ2 — latitude and longitude must not be null
     if "latitude" in mlos.columns and "longitude" in mlos.columns:
@@ -598,46 +616,78 @@ def run_settlement_qc(mlos: pd.DataFrame):
             "no two settlements may share identical latitude/longitude coordinates",
             mask_sq3, ["latitude", "longitude"])
 
-    # SQ4 — every settlement must be > 30 m from every other settlement
+    # SQ4 / SQ5 — settlement proximity clusters. Each settlement is banded by the
+    # distance to its nearest other settlement: SQ4 < 20 m, SQ5 20–30 m.
     if "latitude" in mlos.columns and "longitude" in mlos.columns:
-        lat = pd.to_numeric(mlos["latitude"],  errors="coerce")
-        lon = pd.to_numeric(mlos["longitude"], errors="coerce")
-        valid     = lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
-        valid_idx = mlos.index[valid]
-        mask_sq4  = pd.Series(False, index=mlos.index)
+        lat   = pd.to_numeric(mlos["latitude"],  errors="coerce").values
+        lon   = pd.to_numeric(mlos["longitude"], errors="coerce").values
+        valid = np.flatnonzero(~np.isnan(lat) & ~np.isnan(lon) & (lat != 0) & (lon != 0))
 
-        if len(valid_idx) > 1:
-            R      = 6371000.0           # Earth radius in metres
-            lats_r = np.radians(lat[valid].values)
-            lons_r = np.radians(lon[valid].values)
-            n      = len(lats_r)
-            too_close = set()
+        nearest_d = np.full(len(mlos), np.inf)
+        nearest_j = np.full(len(mlos), -1)
+        cluster   = np.full(len(mlos), -1)
 
-            for i in range(n - 1):
-                dlat = lats_r[i] - lats_r[i + 1:]
-                dlon = lons_r[i] - lons_r[i + 1:]
-                a    = (np.sin(dlat / 2) ** 2 +
-                        np.cos(lats_r[i]) * np.cos(lats_r[i + 1:]) *
-                        np.sin(dlon / 2) ** 2)
-                d    = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
-                close_j = np.where(d < 30)[0]
-                if len(close_j):
-                    too_close.add(i)
-                    too_close.update(int(i + 1 + j) for j in close_j)
+        if len(valid) > 1:
+            R  = 6371000.0           # Earth radius in metres
+            la = np.radians(lat[valid])
+            lo = np.radians(lon[valid])
+            # Candidate pairs from a local metric projection (35 m search covers
+            # projection error), then exact Haversine distance on each pair.
+            pts  = shapely.points(R * lo * np.cos(la), R * la)
+            i, j = shapely.STRtree(pts).query(pts, predicate="dwithin", distance=35)
+            keep = i < j
+            i, j = i[keep], j[keep]
+            a = (np.sin((la[i] - la[j]) / 2) ** 2 +
+                 np.cos(la[i]) * np.cos(la[j]) * np.sin((lo[i] - lo[j]) / 2) ** 2)
+            d = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+            close = d < 30
+            i, j, d = valid[i[close]], valid[j[close]], d[close]
 
-            for k in too_close:
-                mask_sq4[valid_idx[k]] = True
+            for a_, b_, d_ in zip(i, j, d):
+                if d_ < nearest_d[a_]: nearest_d[a_], nearest_j[a_] = d_, b_
+                if d_ < nearest_d[b_]: nearest_d[b_], nearest_j[b_] = d_, a_
 
-        add("SQ4", "Settlements Too Close (< 30 m)",
-            "each settlement must be more than 30 metres from all other settlements",
-            mask_sq4, ["ward_code", "settlement_name", "latitude", "longitude"])
+            # Cluster = connected group of settlements linked by < 30 m pairs
+            parent = {}
+            def find(x):
+                while parent.get(x, x) != x:
+                    parent[x] = parent.get(parent[x], parent[x])
+                    x = parent[x]
+                return x
+            for a_, b_ in zip(i, j):
+                ra, rb = find(a_), find(b_)
+                if ra != rb: parent[max(ra, rb)] = min(ra, rb)
+            members = np.unique(np.concatenate([i, j])) if len(i) else np.array([], dtype=int)
+            roots   = {}
+            for m in members:
+                cluster[m] = roots.setdefault(find(m), len(roots) + 1)
+
+        cluster_size = pd.Series(cluster).map(pd.Series(cluster[cluster > 0]).value_counts()).values
+        names = (mlos["settlement_name"].astype(str).values
+                 if "settlement_name" in mlos.columns else np.array([""] * len(mlos)))
+
+        def add_proximity(num, rule, desc, fail):
+            add(num, rule, desc, pd.Series(fail, index=mlos.index),
+                ["ward_code", "settlement_name", "latitude", "longitude"])
+            if fail.any():
+                pos = np.flatnonzero(fail)
+                details[-1]["Cluster ID"]                = [f"C{cluster[p]}" for p in pos]
+                details[-1]["Cluster Size"]              = cluster_size[pos].astype(int)
+                details[-1]["Nearest Settlement"]        = names[nearest_j[pos]]
+                details[-1]["Nearest Distance (m)"]      = nearest_d[pos].round(1)
+
+        add_proximity("SQ4", "Settlements Too Close (< 20 m)",
+            "nearest other settlement is less than 20 metres away",
+            nearest_d < 20)
+        add_proximity("SQ5", "Settlements Too Close (20–30 m)",
+            "nearest other settlement is between 20 and 30 metres away",
+            (nearest_d >= 20) & (nearest_d < 30))
 
     return checks, pd.concat(details) if details else pd.DataFrame()
 
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
 def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
-                  tp_fail_rows: int, schema_detail: pd.DataFrame,
-                  boundary_fail_rows: int):
+                  schema_detail: pd.DataFrame, boundary_fail_rows: int):
     """Send QC summary email using SMTP credentials stored in st.secrets."""
     import smtplib
     from email.mime.multipart import MIMEMultipart
@@ -665,7 +715,6 @@ Checks Passing    : {n_pass}
 Checks Failing    : {n_fail}
 
 MLoS Issue Rows       : {mlos_fail_rows:,}
-Takeoffpoint Issue Rows: {tp_fail_rows:,}
 Boundary Issue Rows   : {boundary_fail_rows:,}
 {schema_lines}
 Check-by-Check Summary:
@@ -804,12 +853,12 @@ def build_corrected_excel(df: pd.DataFrame) -> bytes:
 
 
 # ─── QC Engine — MLoS ────────────────────────────────────────────────────────────
-def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
+def run_mlos_qc(mlos: pd.DataFrame, hf_by_ward: dict):
     checks, details = [], []
     total  = len(mlos)
     id_col = "ogc_fid" if "ogc_fid" in mlos.columns else mlos.columns[0]
     BASE   = [c for c in [id_col,"state_name","lga_name","ward_code",
-                           "settlement_name","takeoffpoint","takeoffpoint_code"]
+                           "settlement_name","takeoffpoint"]
               if c in mlos.columns]
 
     def add(num, rule, desc, mask, extra=None):
@@ -861,108 +910,104 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
             )
             details.append(_sub1)
 
-    # R2 — Takeoffpoint Name Match
-    if "takeoffpoint" in mlos.columns and "name" in takeoff.columns:
-        valid = set(takeoff["name"].dropna().str.strip()) - {""}
-        add("2", "Takeoffpoint Name Match",
-            "takeoffpoint in MLoS must match name in Takeoffpoint table",
-            ~mlos["takeoffpoint"].astype(str).str.strip().isin(valid), ["takeoffpoint"])
+    # R2 — takeoffpoint must be a health facility in the settlement's own ward
+    # (names compared via facility_key / same_facility; blank takeoffpoint fails)
+    if "takeoffpoint" in mlos.columns and "ward_code" in mlos.columns and hf_by_ward:
+        tp = mlos["takeoffpoint"].fillna("").astype(str).str.strip()
+        wc = mlos["ward_code"].fillna("").astype(str).str.strip()
+        results = {pair: match_takeoffpoint(pair[0], pair[1], hf_by_ward)
+                   for pair in set(zip(wc, tp))}
+        matched = pd.Series([results[pair][0] for pair in zip(wc, tp)], index=mlos.index)
+        add("2", "Takeoffpoint — Health Facility Match",
+            "takeoffpoint must be a health facility in the settlement's ward_code "
+            "(case, word order, abbreviations like PHC/BHC/HP and minor spelling differences ignored)",
+            ~matched, ["takeoffpoint"])
+        if (~matched).any():
+            details[-1]["Closest Health Facilities in Ward"] = [
+                results[pair][1] for pair, ok in zip(zip(wc, tp), matched) if not ok
+            ]
 
-    # R3 — Takeoffpoint Code Match
-    if "takeoffpoint_code" in mlos.columns and "code" in takeoff.columns:
-        valid = set(takeoff["code"].dropna().str.strip()) - {""}
-        add("3", "Takeoffpoint Code Match",
-            "takeoffpoint_code in MLoS must match code in Takeoffpoint table",
-            ~mlos["takeoffpoint_code"].astype(str).str.strip().isin(valid), ["takeoffpoint_code"])
-
-    # R4 — Ward Code Match
-    if "ward_code" in mlos.columns and "wardcode" in takeoff.columns:
-        valid = set(takeoff["wardcode"].dropna().str.strip()) - {""}
-        add("4", "Ward Code Match",
-            "ward_code in MLoS must match wardcode in Takeoffpoint table",
-            ~mlos["ward_code"].astype(str).str.strip().isin(valid), ["ward_code"])
-
-    # R5 — Security Compromised Y/N
+    # R3 — Security Compromised Y/N
     if "security_compromised" in mlos.columns:
-        add("5", "Security Compromised Y/N",
+        add("3", "Security Compromised Y/N",
             "security_compromised must be Y or N",
             ~mlos["security_compromised"].astype(str).str.strip().isin({"Y", "N"}),
             ["security_compromised"])
 
-    # R6 — Accessibility Status Valid
+    # R4 — Accessibility Status Valid
     if "accessibility_status" in mlos.columns:
-        add("6", "Accessibility Status Valid",
+        add("4", "Accessibility Status Valid",
             "accessibility_status must be: Fully Accessible, Partially Accessible, or Inaccessible",
             ~mlos["accessibility_status"].astype(str).str.strip().isin(VALID_ACC),
             ["accessibility_status"])
 
-    # R7 — Reason for Inaccessibility Required
+    # R5 — Reason for Inaccessibility Required
     if "accessibility_status" in mlos.columns and "reasons_for_inaccessibility" in mlos.columns:
         needs     = mlos["accessibility_status"].isin(["Partially Accessible", "Inaccessible"])
         no_reason = (mlos["reasons_for_inaccessibility"].isna() |
                      mlos["reasons_for_inaccessibility"].astype(str).str.strip().eq(""))
-        add("7", "Reason for Inaccessibility Required",
+        add("5", "Reason for Inaccessibility Required",
             "Partially Accessible & Inaccessible settlements must have reasons_for_inaccessibility",
             needs & no_reason, ["accessibility_status", "reasons_for_inaccessibility"])
 
-    # R8 — Habitational Status Valid
+    # R6 — Habitational Status Valid
     if "habitational_status" in mlos.columns:
-        add("8", "Habitational Status Valid",
+        add("6", "Habitational Status Valid",
             "habitational_status must be: Abandoned, Migrated, Inhabited, or Partially Inhabited",
             ~mlos["habitational_status"].astype(str).str.strip().isin(VALID_HAB),
             ["habitational_status"])
 
-    # R9 — set_target must not exceed set_population
+    # R7 — set_target must not exceed set_population
     if "set_target" in mlos.columns and "set_population" in mlos.columns:
         mask = (pd.to_numeric(mlos["set_target"], errors="coerce") >
                 pd.to_numeric(mlos["set_population"], errors="coerce")).fillna(False)
-        add("9", "set_target ≤ set_population",
+        add("7", "set_target ≤ set_population",
             "set_target must not exceed set_population",
             mask, ["set_target", "set_population"])
 
-    # R10 — number_of_household must not exceed set_population
+    # R8 — number_of_household must not exceed set_population
     if "number_of_household" in mlos.columns and "set_population" in mlos.columns:
         mask = (pd.to_numeric(mlos["number_of_household"], errors="coerce") >
                 pd.to_numeric(mlos["set_population"], errors="coerce")).fillna(False)
-        add("10", "number_of_household ≤ set_population",
+        add("8", "number_of_household ≤ set_population",
             "number_of_household must not exceed set_population",
             mask, ["number_of_household", "set_population"])
 
-    # R11 — Urban / Rural / Scattered must be Y or N
+    # R9 — Urban / Rural / Scattered must be Y or N
     for col in ["urban", "rural", "scattered"]:
         if col in mlos.columns:
-            add("11", f"{col} is Y or N",
+            add("9", f"{col} is Y or N",
                 f"{col} must be Y or N and must not be null",
                 ~mlos[col].astype(str).str.strip().isin(VALID_YN), [col])
 
     if "urban" in mlos.columns and "rural" in mlos.columns:
         mask = ((mlos["urban"].astype(str).str.strip() == "Y") &
                 (mlos["rural"].astype(str).str.strip() == "Y"))
-        add("11a", "Cannot be both Urban and Rural",
+        add("9a", "Cannot be both Urban and Rural",
             "A settlement cannot be both urban=Y and rural=Y", mask, ["urban", "rural"])
 
     if "urban" in mlos.columns and "scattered" in mlos.columns:
         mask = ((mlos["urban"].astype(str).str.strip() == "Y") &
                 (mlos["scattered"].astype(str).str.strip() == "Y"))
-        add("11b", "Urban cannot be Scattered",
+        add("9b", "Urban cannot be Scattered",
             "Urban settlements cannot be categorised as scattered", mask, ["urban", "scattered"])
 
-    # R12 — Profile Flags must be Y / N / NA
+    # R10 — Profile Flags must be Y / N / NA
     for col in YN_NA_COLS:
         if col in mlos.columns:
-            add("12", f"{col} = Y/N/NA",
+            add("10", f"{col} = Y/N/NA",
                 f"{col} must be Y, N, or NA",
                 ~mlos[col].astype(str).str.strip().isin(VALID_YN_NA), [col])
 
-    # R13 — Editor must follow firstname.surname format
+    # R11 — Editor must follow firstname.surname format
     if "editor" in mlos.columns:
-        add("13", "Editor Format (firstname.surname)",
+        add("11", "Editor Format (firstname.surname)",
             "editor must be in format: firstname.surname (all lowercase)",
             ~vec_is_editor(mlos["editor"]), ["editor"])
 
-    # R14 — eha_guid must be a valid UUID
+    # R12 — eha_guid must be a valid UUID
     if "eha_guid" in mlos.columns:
-        add("14", "eha_guid is UUID",
+        add("12", "eha_guid is UUID",
             "eha_guid must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)",
             ~vec_is_uuid(mlos["eha_guid"]), ["eha_guid"])
 
@@ -970,56 +1015,8 @@ def run_mlos_qc(mlos: pd.DataFrame, takeoff: pd.DataFrame):
     return checks, pd.concat(details) if details else pd.DataFrame()
 
 
-# ─── QC Engine — Takeoffpoint ────────────────────────────────────────────────────
-def run_takeoff_qc(takeoff: pd.DataFrame, mlos: pd.DataFrame):
-    if takeoff.empty or len(takeoff.columns) == 0:
-        return [], pd.DataFrame()
-    checks, details = [], []
-    total  = len(takeoff)
-    id_col = "ogc_fid" if "ogc_fid" in takeoff.columns else takeoff.columns[0]
-    BASE   = [c for c in [id_col,"name","wardcode","code"] if c in takeoff.columns]
-
-    def add(num, rule, desc, mask, extra=None):
-        n    = int(mask.sum())
-        cols = BASE + [c for c in (extra or []) if c in takeoff.columns and c not in BASE]
-        checks.append({"Rule#": num, "QC Check": rule, "Description": desc,
-                       "Failing Rows": n, "Total Rows": total,
-                       "Fail %": pct(n, total),
-                       "Status": "❌ FAIL" if n else "✅ PASS"})
-        if n:
-            sub = takeoff[mask][cols].copy()
-            sub.insert(0, "Rule#", num)
-            sub.insert(1, "Rule", rule)
-            details.append(sub)
-
-    if "name" in takeoff.columns and "takeoffpoint" in mlos.columns:
-        add("TP2","Name matches MLoS takeoffpoint",
-            "name in Takeoffpoint must match takeoffpoint column in MLoS",
-            ~takeoff["name"].astype(str).str.strip().isin((set(mlos["takeoffpoint"].dropna().str.strip()) - {""})),
-            ["name"])
-
-    if "code" in takeoff.columns and "takeoffpoint_code" in mlos.columns:
-        add("TP3","Code matches MLoS takeoffpoint_code",
-            "code in Takeoffpoint must match takeoffpoint_code in MLoS",
-            ~takeoff["code"].astype(str).str.strip().isin((set(mlos["takeoffpoint_code"].dropna().str.strip()) - {""})),
-            ["code"])
-
-    if "wardcode" in takeoff.columns and "ward_code" in mlos.columns:
-        add("TP4","wardcode matches MLoS ward_code",
-            "wardcode in Takeoffpoint must match ward_code in MLoS",
-            ~takeoff["wardcode"].astype(str).str.strip().isin((set(mlos["ward_code"].dropna().str.strip()) - {""})),
-            ["wardcode"])
-
-    if "globalid" in takeoff.columns:
-        add("TP5","globalid is UUID","globalid must be a valid UUID",
-            ~vec_is_uuid(takeoff["globalid"]), ["globalid"])
-
-    return checks, pd.concat(details, ignore_index=True) if details else pd.DataFrame()
-
-
 # ─── Excel Report Builder ─────────────────────────────────────────────────────────
-def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
-                        mlos_df, takeoff_df):
+def build_excel_report(filename, mlos_checks, mlos_detail, mlos_df):
     out = BytesIO()
     wb  = openpyxl.Workbook()
 
@@ -1046,8 +1043,7 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
             c = ws.cell(row=row, column=ci, value=col)
             c.fill=hdr_fill; c.font=hdr_font; c.alignment=ctr; c.border=bdr
 
-    total_fail = (sum(1 for c in mlos_checks if "FAIL" in c["Status"]) +
-                  sum(1 for c in tp_checks   if "FAIL" in c["Status"]))
+    total_fail = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
 
     # ── Sheet 1: Cover ──
     ws = wb.active; ws.title = "QC Report Cover"
@@ -1065,13 +1061,9 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
         ("File",                   filename),
         ("Generated At",           datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ("MLoS Rows",              len(mlos_df)),
-        ("Takeoffpoint Rows",      len(takeoff_df)),
         ("MLoS Checks Run",        len(mlos_checks)),
         ("MLoS Checks Failing",    sum(1 for c in mlos_checks if "FAIL" in c["Status"])),
-        ("TP Checks Run",          len(tp_checks)),
-        ("TP Checks Failing",      sum(1 for c in tp_checks   if "FAIL" in c["Status"])),
         ("Total MLoS Issue Rows",  len(mlos_detail)),
-        ("Total TP Issue Rows",    len(tp_detail)),
     ]
     for ri, (k, v) in enumerate(meta, 3):
         ka = ws.cell(row=ri, column=1, value=k); ka.font=bold_font; ka.border=bdr
@@ -1150,29 +1142,11 @@ def build_excel_report(filename, mlos_checks, mlos_detail, tp_checks, tp_detail,
 
     write_summary(wb.create_sheet("MLoS QC Summary"),       "MLoS Table — QC Check Summary",          mlos_checks)
     write_detail (wb.create_sheet("MLoS Issue Detail"),      "MLoS Table — Detailed Issue Rows",        mlos_detail)
-    write_summary(wb.create_sheet("Takeoffpoint QC Summary"),"Takeoffpoint Table — QC Check Summary",   tp_checks)
-    write_detail (wb.create_sheet("Takeoffpoint Issue Detail"),"Takeoffpoint Table — Detailed Issues",  tp_detail)
     write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_df)
-    write_raw    (wb.create_sheet("Raw Takeoffpoint Data"),  takeoff_df)
 
     wb.save(out)
     return out.getvalue()
 
-
-# ─── Takeoffpoint File Loader ────────────────────────────────────────────────────
-def load_takeoffpoint_file(tp_file) -> pd.DataFrame:
-    """Parse a separately uploaded takeoffpoint CSV or Excel file."""
-    ext = tp_file.name.rsplit(".", 1)[-1].lower()
-    tp_file.seek(0)
-    if ext == "csv":
-        return pd.read_csv(tp_file, dtype=str, keep_default_na=False)
-    xl = pd.ExcelFile(tp_file)
-    tp_aliases = {TAKEOFF_VIEW.lower(), "takeoffpoint", "takeoff", "takeoff_point"}
-    tp_sheet = next(
-        (s for s in xl.sheet_names if s.lower() in tp_aliases),
-        xl.sheet_names[0],
-    )
-    return xl.parse(tp_sheet, dtype=str, keep_default_na=False)
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -1186,14 +1160,6 @@ with st.sidebar:
     )
     st.caption("`.sqlite` · `.csv` · `.xlsx` · `.xls`")
 
-    st.markdown("**Takeoffpoint File** *(optional)*")
-    uploaded_tp = st.file_uploader(
-        "Upload Takeoffpoint file",
-        type=["csv", "xlsx", "xls"],
-        key="tp_upload", label_visibility="collapsed",
-    )
-    st.caption("Upload separately when MLoS file is `.csv`, or to override the built-in takeoffpoint sheet.")
-
     st.markdown("")
     run_qc_btn = st.button(
         "▶️ Run QC",
@@ -1202,10 +1168,7 @@ with st.sidebar:
         disabled=(uploaded is None),
     )
     if run_qc_btn and uploaded:
-        tp_key = (uploaded_tp.name, getattr(uploaded_tp, "size", None)) if uploaded_tp else None
-        st.session_state["submitted_key"] = (
-            uploaded.name, getattr(uploaded, "size", None), tp_key
-        )
+        st.session_state["submitted_key"] = (uploaded.name, getattr(uploaded, "size", None))
     st.markdown("---")
     st.markdown("#### 📋 QC Rules Reference")
     with st.expander("🔧 Auto Correct Rules", expanded=False):
@@ -1225,59 +1188,46 @@ with st.sidebar:
 | Rule | Check |
 |------|-------|
 | S1 | All 43 required MLoS columns present |
-| S2 | All 4 required Takeoffpoint columns present |
 
 **MLoS required columns:**
 `state_code`, `state_name`, `lga_code`, `lga_name`, `ward_name`, `ward_code`, `takeoffpoint`, `takeoffpoint_code`, `settlement_name`, `primarysettlement_name`, `alternate_name`, `latitude`, `longitude`, `security_compromised`, `accessibility_status`, `reasons_for_inaccessibility`, `habitational_status`, `set_population`, `set_target`, `number_of_household`, `noncompliant_household`, `team_code`, `day_of_activity`, `urban`, `rural`, `highrisk`, `slums`, `densely_populated`, `hard2reach`, `border`, `nomadic`, `scattered`, `riverine`, `fulani`, `timestamp`, `source`, `last_updated`, `editor`, `validation_status`, `master_id`, `mlos_id`, `eha_guid`, `settlementarea_globalid`
 
-**Takeoffpoint required columns:**
-`name`, `code`, `wardcode`, `globalid`
         """)
     with st.expander("🏘️ MLoS Table Rules", expanded=False):
         st.markdown("""
 | Rule | Check |
 |------|-------|
 | 1 | All schema NOT NULL fields must not be null (`state_code`, `state_name`, `lga_code`, `lga_name`, `ward_name`, `ward_code`, `settlement_name`, `latitude`, `longitude`, `security_compromised`, `accessibility_status`, `set_population`, `set_target`, `number_of_household`, `urban`, `rural`, `scattered`, `highrisk`, `slums`, `densely_populated`, `hard2reach`, `border`, `nomadic`, `riverine`, `fulani`, `timestamp`, `eha_guid`, `settlementarea_globalid`) |
-| 2 | takeoffpoint == takeoffpoint.name |
-| 3 | takeoffpoint_code == takeoffpoint.code |
-| 4 | ward_code == takeoffpoint.wardcode |
-| 5 | security_compromised = Y/N |
-| 6 | accessibility_status valid |
-| 7 | Partial/Inaccessible requires reason |
-| 8 | habitational_status valid |
-| 9 | set_target ≤ set_population |
-| 10 | number_of_household ≤ set_population |
-| 11 | urban/rural/scattered = Y/N (no conflict) |
-| 12 | Profile flags = Y/N/NA (highrisk, slums, densely_populated, hard2reach, border, nomadic, riverine, fulani) |
-| 13 | editor = firstname.surname (lowercase) |
-| 14 | eha_guid = valid UUID |
+| 2 | takeoffpoint is a health facility in the settlement's ward (abbreviations/spelling variants allowed) |
+| 3 | security_compromised = Y/N |
+| 4 | accessibility_status valid |
+| 5 | Partial/Inaccessible requires reason |
+| 6 | habitational_status valid |
+| 7 | set_target ≤ set_population |
+| 8 | number_of_household ≤ set_population |
+| 9 | urban/rural/scattered = Y/N (no conflict) |
+| 10 | Profile flags = Y/N/NA (highrisk, slums, densely_populated, hard2reach, border, nomadic, riverine, fulani) |
+| 11 | editor = firstname.surname (lowercase) |
+| 12 | eha_guid = valid UUID |
         """)
     with st.expander("📐 Settlement QC Rules", expanded=False):
         st.markdown("""
 | Rule | Check |
 |------|-------|
-| SQ1 | settlement_name must be unique within each ward_code |
+| SQ1 | settlement_name must be unique within each ward_code (case/extra spaces ignored) |
 | SQ2 | latitude and longitude must not be null or missing |
 | SQ2b | latitude and longitude must not be zero |
 | SQ3 | No two settlements may share identical coordinates (stacked) |
-| SQ4 | Every settlement must be > 30 m from every other settlement |
-        """)
-    with st.expander("📍 Takeoffpoint Rules", expanded=False):
-        st.markdown("""
-| Rule | Check |
-|------|-------|
-| TP2 | name == mlos.takeoffpoint |
-| TP3 | code == mlos.takeoffpoint_code |
-| TP4 | wardcode == mlos.ward_code |
-| TP5 | globalid = valid UUID |
+| SQ4 | Nearest other settlement must not be < 20 m away (proximity cluster) |
+| SQ5 | Nearest other settlement must not be 20–30 m away (proximity cluster) |
         """)
     with st.expander("🗺️ Boundary Check Rules", expanded=False):
         st.markdown("""
 | Rule | Check |
 |------|-------|
 | B0 | ward_code is not null/empty on the uploaded data |
-| B1 | ward_code exists in admin ward boundary reference (9,410 wards) |
-| B2 | latitude/longitude falls within the bounding box of the declared ward_code |
+| B1 | ward_code exists in admin ward boundary reference (9,406 wards) |
+| B2 | ward_code matches the ward boundary polygon the latitude/longitude falls in |
 | B3 | state_name in MLoS matches the state_name assigned to that ward_code in the boundary reference |
         """)
     st.markdown("---")
@@ -1293,25 +1243,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if not uploaded:
-    st.info("👈 **Upload your MLoS file** (and optionally a Takeoffpoint file) using the sidebar, then click **▶️ Run QC**.")
+    st.info("👈 **Upload your MLoS file** using the sidebar, then click **▶️ Run QC**.")
     with st.expander("ℹ️ About this tool", expanded=True):
         st.markdown("""
 This tool runs automated Quality Control on MLOS checkout files across **4 QC layers**.
 
 **Supported formats:**
-- **SQLite** (`.sqlite`, `.db`) — reads MLoS and Takeoffpoint views directly
-- **Excel** (`.xlsx`, `.xls`) — Sheet 1 = MLoS, Sheet 2 = Takeoffpoint
-- **CSV** (`.csv`) — MLoS data only; upload a separate Takeoffpoint file to enable cross-checks
+- **SQLite** (`.sqlite`, `.db`) — reads the MLoS view directly
+- **Excel** (`.xlsx`, `.xls`) — MLoS sheet (or the first sheet)
+- **CSV** (`.csv`) — MLoS data
 
-**Takeoffpoint file (separate upload):**
-Upload a `.csv` or `.xlsx` Takeoffpoint file alongside any MLoS format.
-It overrides the built-in Takeoffpoint sheet for Excel/SQLite files.
+Takeoffpoints are checked against the bundled health facility reference — no separate file is needed.
 
 **QC Layers:**
-- 🔎 **Schema Alignment** (S1–S2) — verifies all required columns are present
-- 🏘️ **MLoS Rules** (2–17) — data integrity checks
-- 📍 **Takeoffpoint Rules** (TP2–TP5) — 4 cross-table checks
-- 🗺️ **Boundary Checks** (B0–B3) — ward code, coordinate, and state name validation against admin boundary reference
+- 🔎 **Schema Alignment** (S1) — verifies all required columns are present
+- 🏘️ **MLoS Rules** (1–12) — data integrity checks, including takeoffpoint vs. health facility
+- 📐 **Settlement QC** (SQ1–SQ5) — duplicate, coordinate, stacking, and proximity checks
+- 🗺️ **Boundary Checks** (B0–B3) — ward code, spatial ward match, and state name validation against admin boundary reference
 
 **Outputs:**
 - Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score on the dashboard
@@ -1321,8 +1269,7 @@ It overrides the built-in Takeoffpoint sheet for Excel/SQLite files.
     st.stop()
 
 # ─── Determine submitted state ────────────────────────────────────────────────────
-_tp_key = (uploaded_tp.name, getattr(uploaded_tp, "size", None)) if uploaded_tp else None
-_current_key = (uploaded.name, getattr(uploaded, "size", None), _tp_key)
+_current_key = (uploaded.name, getattr(uploaded, "size", None))
 _qc_submitted = st.session_state.get("submitted_key") == _current_key
 
 if not _qc_submitted:
@@ -1333,25 +1280,18 @@ if not _qc_submitted:
 load_progress = st.progress(0)
 with st.spinner("Loading file…"):
     try:
-        mlos_df, takeoff_df = get_uploaded_data(uploaded, progress=load_progress)
+        mlos_df = get_uploaded_data(uploaded, progress=load_progress)
     except Exception as e:
         st.error(f"❌ Failed to load file: {e}")
         st.stop()
-
-# Override takeoffpoint with separately uploaded file if provided
-if uploaded_tp is not None:
-    try:
-        uploaded_tp.seek(0)
-        takeoff_df = load_takeoffpoint_file(uploaded_tp)
-    except Exception as e:
-        st.warning(f"⚠️ Could not load Takeoffpoint file: {e} — takeoffpoint cross-checks will be skipped.")
-        takeoff_df = pd.DataFrame()
 
 filename = uploaded.name
 
 # ─── RUN QC ───────────────────────────────────────────────────────────────────────
 qc_cache_key = _current_key
-boundary_ref, boundary_bbox = load_boundary_refs()
+boundary_ref = load_boundary_refs()
+boundary_geom = load_ward_geoms()
+hf_by_ward = load_health_facilities()
 
 if (st.session_state.get("qc_cache_key") == qc_cache_key
         and "mlos_df_corrected" in st.session_state):
@@ -1361,8 +1301,6 @@ if (st.session_state.get("qc_cache_key") == qc_cache_key
     mlos_detail        = st.session_state["mlos_detail"]
     settlement_checks  = st.session_state["settlement_checks"]
     settlement_detail  = st.session_state["settlement_detail"]
-    tp_checks          = st.session_state["tp_checks"]
-    tp_detail          = st.session_state["tp_detail"]
     boundary_checks    = st.session_state["boundary_checks"]
     boundary_detail    = st.session_state["boundary_detail"]
     mlos_df            = st.session_state["mlos_df_corrected"]
@@ -1381,50 +1319,37 @@ else:
         else:
             st.write("   ✅ Auto Correct: no corrections needed")
 
-        # ── Step 1 / 5: Schema Alignment ─────────────────────────────────
-        qc_bar.progress(5, text="🔎 Step 1 / 5 — Schema Alignment…")
-        st.write("🔎 Step 1 / 5 — Schema Alignment")
-        schema_checks, schema_detail = run_schema_qc(mlos_df, takeoff_df)
+        # ── Step 1 / 4: Schema Alignment ─────────────────────────────────
+        qc_bar.progress(5, text="🔎 Step 1 / 4 — Schema Alignment…")
+        st.write("🔎 Step 1 / 4 — Schema Alignment")
+        schema_checks, schema_detail = run_schema_qc(mlos_df)
         schema_fail = sum(1 for c in schema_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if schema_fail else '✅'} Schema: "
                  f"{len(schema_checks) - schema_fail}/{len(schema_checks)} checks passed")
-        qc_bar.progress(20, text="✅ Step 1 / 5 — Schema Alignment complete")
+        qc_bar.progress(25, text="✅ Step 1 / 4 — Schema Alignment complete")
 
-        # ── Step 2 / 5: MLoS Rules ───────────────────────────────────────
-        qc_bar.progress(21, text="🏘️ Step 2 / 5 — MLoS Rules…")
-        st.write("🏘️ Step 2 / 5 — MLoS Rules")
-        mlos_checks, mlos_detail = run_mlos_qc(mlos_df, takeoff_df)
+        # ── Step 2 / 4: MLoS Rules ───────────────────────────────────────
+        qc_bar.progress(26, text="🏘️ Step 2 / 4 — MLoS Rules…")
+        st.write("🏘️ Step 2 / 4 — MLoS Rules")
+        mlos_checks, mlos_detail = run_mlos_qc(mlos_df, hf_by_ward)
         mlos_qc_fail = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if mlos_qc_fail else '✅'} MLoS: "
                  f"{len(mlos_checks) - mlos_qc_fail}/{len(mlos_checks)} checks passed")
-        qc_bar.progress(40, text="✅ Step 2 / 5 — MLoS Rules complete")
+        qc_bar.progress(50, text="✅ Step 2 / 4 — MLoS Rules complete")
 
-        # ── Step 3 / 5: Settlement QC ────────────────────────────────────
-        qc_bar.progress(41, text="📐 Step 3 / 5 — Settlement QC…")
-        st.write("📐 Step 3 / 5 — Settlement QC")
+        # ── Step 3 / 4: Settlement QC ────────────────────────────────────
+        qc_bar.progress(51, text="📐 Step 3 / 4 — Settlement QC…")
+        st.write("📐 Step 3 / 4 — Settlement QC")
         settlement_checks, settlement_detail = run_settlement_qc(mlos_df)
         sq_fail = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if sq_fail else '✅'} Settlement: "
                  f"{len(settlement_checks) - sq_fail}/{len(settlement_checks)} checks passed")
-        qc_bar.progress(60, text="✅ Step 3 / 5 — Settlement QC complete")
+        qc_bar.progress(75, text="✅ Step 3 / 4 — Settlement QC complete")
 
-        # ── Step 4 / 5: Takeoffpoint Rules ───────────────────────────────
-        qc_bar.progress(61, text="📍 Step 4 / 5 — Takeoffpoint Rules…")
-        st.write("📍 Step 4 / 5 — Takeoffpoint Rules")
-        if takeoff_df.empty:
-            tp_checks, tp_detail = [], pd.DataFrame()
-            st.write("   ⚠️ Takeoffpoint data not available — skipped")
-        else:
-            tp_checks, tp_detail = run_takeoff_qc(takeoff_df, mlos_df)
-            tp_qc_fail = sum(1 for c in tp_checks if "FAIL" in c["Status"])
-            st.write(f"   {'❌' if tp_qc_fail else '✅'} Takeoffpoint: "
-                     f"{len(tp_checks) - tp_qc_fail}/{len(tp_checks)} checks passed")
-        qc_bar.progress(80, text="✅ Step 4 / 5 — Takeoffpoint Rules complete")
-
-        # ── Step 5 / 5: Boundary Checks ──────────────────────────────────
-        qc_bar.progress(81, text="🗺️ Step 5 / 5 — Boundary Checks…")
-        st.write("🗺️ Step 5 / 5 — Boundary Checks")
-        boundary_checks, boundary_detail = run_ward_boundary_qc(mlos_df, boundary_ref, boundary_bbox)
+        # ── Step 4 / 4: Boundary Checks ──────────────────────────────────
+        qc_bar.progress(76, text="🗺️ Step 4 / 4 — Boundary Checks…")
+        st.write("🗺️ Step 4 / 4 — Boundary Checks")
+        boundary_checks, boundary_detail = run_ward_boundary_qc(mlos_df, boundary_ref, boundary_geom)
         b_fail = sum(1 for c in boundary_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if b_fail else '✅'} Boundary: "
                  f"{len(boundary_checks) - b_fail}/{len(boundary_checks)} checks passed")
@@ -1439,30 +1364,27 @@ else:
     st.session_state["mlos_detail"]        = mlos_detail
     st.session_state["settlement_checks"]  = settlement_checks
     st.session_state["settlement_detail"]  = settlement_detail
-    st.session_state["tp_checks"]          = tp_checks
-    st.session_state["tp_detail"]          = tp_detail
     st.session_state["boundary_checks"]    = boundary_checks
     st.session_state["boundary_detail"]    = boundary_detail
     st.session_state["mlos_df_corrected"]  = mlos_df
     st.session_state["ac_log"]             = _ac_log
 
-all_checks         = schema_checks + mlos_checks + settlement_checks + tp_checks + boundary_checks
+all_checks         = schema_checks + mlos_checks + settlement_checks + boundary_checks
 n_fail             = sum(1 for c in all_checks if "FAIL" in c["Status"])
 n_pass             = len(all_checks) - n_fail
 pct_pass           = f"{n_pass / len(all_checks) * 100:.1f}%" if all_checks else "0%"
 pct_fail           = f"{n_fail / len(all_checks) * 100:.1f}%" if all_checks else "0%"
 mlos_fail_rows     = len(mlos_detail)
 settlement_fail_rows = len(settlement_detail)
-tp_fail_rows       = len(tp_detail)
 boundary_fail_rows = len(boundary_detail)
 
 # ── Weighted Score ───────────────────────────────────────────────────────────────
-# Schema 10% | MLoS 40% | Settlement 20% | Takeoffpoint 20% | Boundary 10%
+# Schema 10% | MLoS 60% | Settlement 20% | Boundary 10%
+# (MLoS absorbed the former Takeoffpoint layer's 20% — takeoffpoint is now MLoS Rule 2)
 LAYER_WEIGHTS = {
     "schema":     0.10,
-    "mlos":       0.40,
+    "mlos":       0.60,
     "settlement": 0.20,
-    "tp":         0.20,
     "boundary":   0.10,
 }
 
@@ -1475,19 +1397,18 @@ def _layer_pass_rate(checks):
 schema_score     = _layer_pass_rate(schema_checks)     * LAYER_WEIGHTS["schema"]     * 100
 mlos_score       = _layer_pass_rate(mlos_checks)     * LAYER_WEIGHTS["mlos"]       * 100
 settlement_score = _layer_pass_rate(settlement_checks) * LAYER_WEIGHTS["settlement"] * 100
-tp_score         = _layer_pass_rate(tp_checks)       * LAYER_WEIGHTS["tp"]         * 100
 boundary_score   = _layer_pass_rate(boundary_checks) * LAYER_WEIGHTS["boundary"]   * 100
-weighted_score   = schema_score + mlos_score + settlement_score + tp_score + boundary_score
+weighted_score   = schema_score + mlos_score + settlement_score + boundary_score
 
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
-st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_df):,} rows** | Takeoffpoint: **{len(takeoff_df):,} rows**")
+st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_df):,} rows**")
 
 c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
 c1.metric("📄 MLoS Rows",     f"{len(mlos_df):,}")
 c2.metric("🔍 Checks Run",    f"{len(all_checks)}")
 c3.metric("✅ Passing",       f"{n_pass}")
 c4.metric("❌ Failing",       f"{n_fail}")
-c5.metric("⚠️ Issue Rows",   f"{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows:,}")
+c5.metric("⚠️ Issue Rows",   f"{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows:,}")
 c6.metric("📈 Pass Rate",     pct_pass)
 c7.metric("🏆 Weighted Score", f"{weighted_score:.1f}%")
 
@@ -1501,17 +1422,16 @@ else:
     st.markdown(
         f'<div class="banner-fail">❌ {n_fail} QC CHECK(S) FAILING — '
         f'{mlos_fail_rows} MLoS rows, {settlement_fail_rows} Settlement rows, '
-        f'{tp_fail_rows} Takeoffpoint rows, and {boundary_fail_rows} Boundary rows have issues. '
+        f'and {boundary_fail_rows} Boundary rows have issues. '
         f'Review details below before submission.</div>',
         unsafe_allow_html=True)
 
 # ─── TABS ─────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🔧 Auto Correct",
     "📊 QC Summary",
     "🏘️ MLoS Issues",
     "📐 Settlement QC",
-    "📍 Takeoffpoint Issues",
     "🗺️ Boundary Issues",
     "🔍 Raw Data",
     "📄 Generate Report",
@@ -1539,9 +1459,8 @@ with tab2:
 
     score_rows = [
         {"QC Layer": "🔎 Schema Alignment",  "Weight": "10%", "Layer Pass Rate": f"{_layer_pass_rate(schema_checks)*100:.1f}%",     "Weighted Contribution": f"{schema_score:.1f}%"},
-        {"QC Layer": "🏘️ MLoS Rules",        "Weight": "40%", "Layer Pass Rate": f"{_layer_pass_rate(mlos_checks)*100:.1f}%",       "Weighted Contribution": f"{mlos_score:.1f}%"},
+        {"QC Layer": "🏘️ MLoS Rules",        "Weight": "60%", "Layer Pass Rate": f"{_layer_pass_rate(mlos_checks)*100:.1f}%",       "Weighted Contribution": f"{mlos_score:.1f}%"},
         {"QC Layer": "📐 Settlement QC",      "Weight": "20%", "Layer Pass Rate": f"{_layer_pass_rate(settlement_checks)*100:.1f}%", "Weighted Contribution": f"{settlement_score:.1f}%"},
-        {"QC Layer": "📍 Takeoffpoint Rules", "Weight": "20%", "Layer Pass Rate": f"{_layer_pass_rate(tp_checks)*100:.1f}%",         "Weighted Contribution": f"{tp_score:.1f}%"},
         {"QC Layer": "🗺️ Boundary Checks",   "Weight": "10%", "Layer Pass Rate": f"{_layer_pass_rate(boundary_checks)*100:.1f}%",   "Weighted Contribution": f"{boundary_score:.1f}%"},
         {"QC Layer": "🏆 Total",              "Weight": "100%","Layer Pass Rate": "—",                                               "Weighted Contribution": f"{weighted_score:.1f}%"},
     ]
@@ -1582,12 +1501,6 @@ with tab2:
     if settlement_checks:
         df_sq = pd.DataFrame(settlement_checks)[["Status","Rule#","QC Check","Description","Failing Rows","Total Rows","Fail %"]]
         st.dataframe(df_sq.style.apply(colour_rows, axis=1), use_container_width=True, hide_index=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="sec-title">📍 Takeoffpoint Table — QC Results</div>', unsafe_allow_html=True)
-    if tp_checks:
-        df_t = pd.DataFrame(tp_checks)[["Status","Rule#","QC Check","Description","Failing Rows","Total Rows","Fail %"]]
-        st.dataframe(df_t.style.apply(colour_rows, axis=1), use_container_width=True, hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="sec-title">🗺️ Boundary Checks — QC Results</div>', unsafe_allow_html=True)
@@ -1713,41 +1626,8 @@ with tab4:
                            file_name=filename.rsplit(".",1)[0] + "_settlement_issues.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ── Tab 5: Takeoffpoint Issues ────────────────────────────────────────────────────
+# ── Tab 5: Boundary Issues ────────────────────────────────────────────────────────
 with tab5:
-    if tp_detail.empty:
-        st.success("✅ No issues found in the Takeoffpoint table — all checks passed!")
-    else:
-        n_failing_tp = sum(1 for c in tp_checks if "FAIL" in c["Status"])
-        st.error(f"❌ **{tp_fail_rows:,} issue row(s)** across **{n_failing_tp} failing check(s)**")
-
-        for check in tp_checks:
-            if "FAIL" not in check["Status"]: continue
-            rn     = check["Rule#"]
-            subset = tp_detail[tp_detail["Rule#"] == rn].drop(columns=["Rule#","Rule"], errors="ignore")
-            n      = len(subset)
-            with st.expander(f"❌  Rule {rn} — {check['QC Check']}  ({n:,} row{'s' if n!=1 else ''})", expanded=False):
-                st.caption(f"📌 {check['Description']}")
-                st.dataframe(subset, use_container_width=True, hide_index=True)
-
-        st.markdown("---")
-        st.markdown("**📋 All Takeoffpoint Issue Rows (combined)**")
-        st.dataframe(tp_detail, use_container_width=True, hide_index=True, height=350)
-
-        buf2 = BytesIO()
-        with pd.ExcelWriter(buf2, engine="openpyxl") as xw:
-            tp_detail.to_excel(xw, sheet_name="All Issues", index=False)
-            for check in tp_checks:
-                if "FAIL" not in check["Status"]: continue
-                rn  = check["Rule#"]
-                sub = tp_detail[tp_detail["Rule#"] == rn].drop(columns=["Rule#","Rule"], errors="ignore")
-                sub.to_excel(xw, sheet_name=f"Rule {rn}"[:31], index=False)
-        st.download_button("⬇️ Download Takeoffpoint Issues (Excel)", data=buf2.getvalue(),
-                           file_name=filename.replace(".sqlite","")+"_tp_issues.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-# ── Tab 6: Boundary Issues ────────────────────────────────────────────────────────
-with tab6:
     n_b_fail = sum(1 for c in boundary_checks if "FAIL" in c["Status"])
     if n_b_fail == 0:
         st.success("✅ All ward codes match the boundary reference and all coordinates fall within their declared ward boundaries.")
@@ -1814,42 +1694,36 @@ with tab6:
                            file_name=filename.rsplit(".",1)[0] + "_boundary_issues.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ── Tab 7: Raw Data ───────────────────────────────────────────────────────────────
+# ── Tab 6: Raw Data ───────────────────────────────────────────────────────────────
+with tab6:
+    st.markdown(f"**{len(mlos_df):,} rows × {len(mlos_df.columns)} columns**")
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        state_opts = ["All"] + sorted(mlos_df["state_name"].dropna().unique().tolist()) \
+                     if "state_name" in mlos_df.columns else ["All"]
+        sel_state = st.selectbox("State", state_opts, key="sel_state")
+    with fc2:
+        if sel_state != "All" and "lga_name" in mlos_df.columns:
+            lga_opts = ["All"] + sorted(mlos_df[mlos_df["state_name"]==sel_state]["lga_name"].dropna().unique().tolist())
+        elif "lga_name" in mlos_df.columns:
+            lga_opts = ["All"] + sorted(mlos_df["lga_name"].dropna().unique().tolist())
+        else:
+            lga_opts = ["All"]
+        sel_lga = st.selectbox("LGA", lga_opts, key="sel_lga")
+    with fc3:
+        search = st.text_input("Search settlement", placeholder="Type to filter…", key="srch")
+
+    fdf = mlos_df.copy()
+    if sel_state != "All" and "state_name" in fdf.columns:
+        fdf = fdf[fdf["state_name"] == sel_state]
+    if sel_lga != "All" and "lga_name" in fdf.columns:
+        fdf = fdf[fdf["lga_name"] == sel_lga]
+    if search and "settlement_name" in fdf.columns:
+        fdf = fdf[fdf["settlement_name"].astype(str).str.contains(search, case=False, na=False)]
+    st.dataframe(fdf, use_container_width=True, hide_index=True, height=420)
+
+# ── Tab 7: Generate Report ────────────────────────────────────────────────────────
 with tab7:
-    rt1, rt2 = st.tabs(["🏘️ MLoS View", "📍 Takeoffpoint View"])
-    with rt1:
-        st.markdown(f"**{len(mlos_df):,} rows × {len(mlos_df.columns)} columns**")
-        fc1, fc2, fc3 = st.columns(3)
-        with fc1:
-            state_opts = ["All"] + sorted(mlos_df["state_name"].dropna().unique().tolist()) \
-                         if "state_name" in mlos_df.columns else ["All"]
-            sel_state = st.selectbox("State", state_opts, key="sel_state")
-        with fc2:
-            if sel_state != "All" and "lga_name" in mlos_df.columns:
-                lga_opts = ["All"] + sorted(mlos_df[mlos_df["state_name"]==sel_state]["lga_name"].dropna().unique().tolist())
-            elif "lga_name" in mlos_df.columns:
-                lga_opts = ["All"] + sorted(mlos_df["lga_name"].dropna().unique().tolist())
-            else:
-                lga_opts = ["All"]
-            sel_lga = st.selectbox("LGA", lga_opts, key="sel_lga")
-        with fc3:
-            search = st.text_input("Search settlement", placeholder="Type to filter…", key="srch")
-
-        fdf = mlos_df.copy()
-        if sel_state != "All" and "state_name" in fdf.columns:
-            fdf = fdf[fdf["state_name"] == sel_state]
-        if sel_lga != "All" and "lga_name" in fdf.columns:
-            fdf = fdf[fdf["lga_name"] == sel_lga]
-        if search and "settlement_name" in fdf.columns:
-            fdf = fdf[fdf["settlement_name"].astype(str).str.contains(search, case=False, na=False)]
-        st.dataframe(fdf, use_container_width=True, hide_index=True, height=420)
-
-    with rt2:
-        st.markdown(f"**{len(takeoff_df):,} rows × {len(takeoff_df.columns)} columns**")
-        st.dataframe(takeoff_df, use_container_width=True, hide_index=True, height=420)
-
-# ── Tab 8: Generate Report ────────────────────────────────────────────────────────
-with tab8:
     st.markdown('<div class="sec-title">📄 QC Report — Summary &amp; Download</div>', unsafe_allow_html=True)
 
     # Verdict
@@ -1860,7 +1734,7 @@ with tab8:
     else:
         st.markdown(
             f'<div class="report-verdict-fail">❌ &nbsp; {n_fail} CHECK(S) FAILING — '
-            f'{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows} total issue rows. Fix before submission.</div>',
+            f'{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows} total issue rows. Fix before submission.</div>',
             unsafe_allow_html=True)
 
     # Metadata card
@@ -1869,8 +1743,6 @@ with tab8:
     mlos_n_pass   = len(mlos_checks)   - mlos_n_fail
     sq_n_fail     = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
     sq_n_pass     = len(settlement_checks) - sq_n_fail
-    tp_n_fail     = sum(1 for c in tp_checks         if "FAIL" in c["Status"])
-    tp_n_pass     = len(tp_checks)     - tp_n_fail
 
     def rrow(lbl, val, cls="val"):
         return (f'<div class="report-row">'
@@ -1883,7 +1755,6 @@ with tab8:
         rrow("🕐 Generated At",            gen_time),
         rrow("━" * 36,                     "", "val-div"),
         rrow("MLoS Rows",                  f"{len(mlos_df):,}"),
-        rrow("Takeoffpoint Rows",          f"{len(takeoff_df):,}"),
         rrow("━" * 36,                     "", "val-div"),
         rrow("MLoS Checks Run",            str(len(mlos_checks))),
         rrow("MLoS Checks ✅ Passing",     str(mlos_n_pass),  "val-pass"),
@@ -1896,17 +1767,11 @@ with tab8:
         rrow("Settlement Checks ❌ Failing", str(sq_n_fail),  "val-fail" if sq_n_fail else "val-pass"),
         rrow("Settlement Issue Rows",      f"{settlement_fail_rows:,}",
                                             "val-fail" if settlement_fail_rows else "val-pass"),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("Takeoffpoint Checks Run",    str(len(tp_checks))),
-        rrow("Takeoffpoint Checks ✅ Passing", str(tp_n_pass),  "val-pass"),
-        rrow("Takeoffpoint Checks ❌ Failing", str(tp_n_fail),  "val-fail" if tp_n_fail else "val-pass"),
-        rrow("Takeoffpoint Issue Rows",    f"{tp_fail_rows:,}",
-                                            "val-fail" if tp_fail_rows else "val-pass"),
     ])
     st.markdown(f'<div class="report-card">{html}</div>', unsafe_allow_html=True)
 
-    # Three-column check breakdown
-    col_a, col_b, col_c = st.columns(3)
+    # Two-column check breakdown
+    col_a, col_b = st.columns(2)
     def hl(row):
         return (["color:#be123c; font-weight:700"] + [""]*4 if "FAIL" in str(row.get("Status",""))
                 else ["color:#15803d; font-weight:700"] + [""]*4)
@@ -1924,24 +1789,14 @@ with tab8:
                                  "Fail %": c["Fail %"]} for c in settlement_checks])
         st.dataframe(tbl_sq.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
 
-    with col_c:
-        st.markdown("**📍 Takeoffpoint Check Breakdown**")
-        tbl_t = pd.DataFrame([{"Status": c["Status"], "Rule#": c["Rule#"],
-                                "QC Check": c["QC Check"], "Failing": c["Failing Rows"],
-                                "Fail %": c["Fail %"]} for c in tp_checks])
-        st.dataframe(tbl_t.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
-
     st.markdown("---")
 
     # Download
     st.markdown("**📥 Download Full QC Report**")
-    st.caption("7-sheet Excel report: Cover Page · MLoS QC Summary · MLoS Issue Detail · "
-               "Takeoffpoint QC Summary · Takeoffpoint Issue Detail · Raw MLoS Data · Raw Takeoffpoint Data")
+    st.caption("4-sheet Excel report: Cover Page · MLoS QC Summary · MLoS Issue Detail · Raw MLoS Data")
 
     with st.spinner("Building Excel report…"):
-        report_bytes = build_excel_report(
-            filename, mlos_checks, mlos_detail,
-            tp_checks, tp_detail, mlos_df, takeoff_df)
+        report_bytes = build_excel_report(filename, mlos_checks, mlos_detail, mlos_df)
 
     report_file = filename.replace(".sqlite","").replace(".db","") + "_QC_Report.xlsx"
     st.download_button(
@@ -1956,7 +1811,7 @@ with tab8:
         st.success("✅ File is CLEAN — all checks passed.")
     else:
         st.warning(f"⚠️ {n_fail} check(s) failing with "
-                   f"{mlos_fail_rows + settlement_fail_rows + tp_fail_rows + boundary_fail_rows} issue rows. "
+                   f"{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows} issue rows. "
                    f"Fix and re-upload before submission.")
 
     st.markdown("---")
@@ -1965,7 +1820,7 @@ with tab8:
     if st.button("📤 Send QC Email", type="primary", key="send_email_btn"):
         try:
             send_qc_email(filename, all_checks, mlos_fail_rows,
-                          tp_fail_rows, schema_detail, boundary_fail_rows)
+                          schema_detail, boundary_fail_rows)
             st.success("✅ Email sent successfully to the data team.")
         except Exception as e:
             st.error(f"❌ Failed to send email: {e}"
