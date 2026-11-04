@@ -8,8 +8,10 @@ import os
 import re
 import difflib
 import zlib
+import uuid
+import io
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -789,11 +791,299 @@ def run_settlement_qc(mlos: pd.DataFrame, extents=None):
         if fail.any():
             pos = np.flatnonzero(fail)
             far_d, far_t = extents.nearest(lat[pos], lon[pos], EXTENT_SEARCH_M)
-            details[-1]["Nearest Extent (m)"] = [f"> {EXTENT_SEARCH_M}" if np.isinf(d) else int(round(d, -1))
+            details[-1]["Nearest Extent (m)"] = [f"> {EXTENT_SEARCH_M}" if np.isinf(d) else str(int(round(d, -1)))
                                                  for d in far_d]
             details[-1]["Nearest Extent Type"] = EXTENT_TYPES[far_t]
 
     return checks, pd.concat(details) if details else pd.DataFrame()
+
+# ─── Shared State Results (GitHub) ────────────────────────────────────────────────
+# Every QC run is saved to a results branch of the GitHub repo so results from all
+# states and users can be compared. Streamlit Cloud's own disk is wiped on restart,
+# so results are committed through the GitHub API instead. Files on the branch:
+#   results/runs.csv               one row per (run, state): score, layer pass rates
+#   results/rules.csv              one row per (run, state, rule): failing rows, status
+#   results/fail/<State>.csv.gz    failing rows from the state's most recent run
+# The branch is separate from the deployed one, so saving never redeploys the app.
+# Requires `github_token` in Streamlit secrets (contents read/write on the repo).
+WAT = timezone(timedelta(hours=1))
+GITHUB_API = "https://api.github.com"
+RESULTS_REPO   = "eHealthAfrica/mlos_checkout_qc_updated"   # override with github_repo
+RESULTS_BRANCH = "qc-results"                              # override with results_branch
+RESULTS_RUNS_COLS  = ["run_id", "timestamp", "state", "uploaded_by", "filename", "rows",
+                      "weighted_score", "schema_pass_pct", "mlos_pass_pct",
+                      "settlement_pass_pct", "boundary_pass_pct", "failing_checks", "issue_rows"]
+RESULTS_RULES_COLS = ["run_id", "timestamp", "state", "layer", "rule", "check",
+                      "failing_rows", "total_rows", "status"]
+RESULTS_FAIL_COLS  = ["run_id", "layer", "rule", "check", "lga_name", "ward_code",
+                      "settlement_name", "latitude", "longitude", "detail"]
+RESULTS_FAIL_CAP   = 40_000   # failing rows kept per state, to keep the repo small
+
+def results_store_configured():
+    try:
+        return "github_token" in st.secrets
+    except Exception:
+        return False
+
+def _gh(method, path, **kw):
+    import requests
+    repo = st.secrets.get("github_repo", RESULTS_REPO)
+    headers = {"Authorization": f"Bearer {st.secrets['github_token']}",
+               "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28", **kw.pop("headers", {})}
+    return requests.request(method, f"{GITHUB_API}/repos/{repo}{path}",
+                            headers=headers, timeout=60, **kw)
+
+def _results_branch():
+    return st.secrets.get("results_branch", RESULTS_BRANCH)
+
+def _gh_read(path, ref=None):
+    """Raw bytes of a file on the results branch (or a commit), or None if absent."""
+    r = _gh("GET", f"/contents/{path}", params={"ref": ref or _results_branch()},
+            headers={"Accept": "application/vnd.github.raw+json"})
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.content
+
+def _gh_commit(build_files, message, attempts=4):
+    """Commit files to the results branch in one commit. build_files(parent_sha)
+    returns {path: bytes}; it is re-run if another save lands first."""
+    import base64
+    branch = _results_branch()
+    for _ in range(attempts):
+        r = _gh("GET", f"/git/ref/heads/{branch}")
+        if r.status_code == 404:
+            parent, base_tree = None, None
+        else:
+            r.raise_for_status()
+            parent = r.json()["object"]["sha"]
+            c = _gh("GET", f"/git/commits/{parent}"); c.raise_for_status()
+            base_tree = c.json()["tree"]["sha"]
+        entries = []
+        for path, data in build_files(parent).items():
+            b = _gh("POST", "/git/blobs", json={"content": base64.b64encode(data).decode(),
+                                                "encoding": "base64"})
+            b.raise_for_status()
+            entries.append({"path": path, "mode": "100644", "type": "blob", "sha": b.json()["sha"]})
+        t = _gh("POST", "/git/trees", json={"tree": entries, **({"base_tree": base_tree} if base_tree else {})})
+        t.raise_for_status()
+        c = _gh("POST", "/git/commits", json={"message": message, "tree": t.json()["sha"],
+                                               "parents": [parent] if parent else []})
+        c.raise_for_status()
+        sha = c.json()["sha"]
+        if parent is None:
+            u = _gh("POST", "/git/refs", json={"ref": f"refs/heads/{branch}", "sha": sha})
+        else:
+            u = _gh("PATCH", f"/git/refs/heads/{branch}", json={"sha": sha, "force": False})
+        if u.status_code in (200, 201):
+            return sha
+        if u.status_code not in (409, 422):   # 409/422: branch moved — rebuild and retry
+            u.raise_for_status()
+    raise RuntimeError("results branch kept changing; try again")
+
+def _csv_bytes(header, rows, with_header):
+    import csv
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    if with_header:
+        w.writerow(header)
+    w.writerows(rows)
+    return buf.getvalue().encode()
+
+def _fail_path(state):
+    return "results/fail/" + re.sub(r"[^A-Za-z0-9 _-]", "_", state).strip() + ".csv.gz"
+
+def _cell(v):
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return ""
+    if isinstance(v, (np.integer, np.floating)):
+        v = v.item()
+    return v if isinstance(v, (int, float)) else str(v)
+
+def resolve_states(df, ref_df, default="Unknown"):
+    """State per row, spelled as in the boundary reference (case-insensitive).
+    Blank or unknown state names fall back to the state of the row's ward_code,
+    then to `default`."""
+    col = lambda c: (df[c].fillna("").astype(str).str.strip() if c in df.columns
+                     else pd.Series("", index=df.index))
+    canon, by_ward = {}, {}
+    if not ref_df.empty:
+        canon   = {n.lower(): n for n in ref_df["state_name"].unique()}
+        by_ward = dict(zip(ref_df["ward_code"], ref_df["state_name"]))
+    state = col("state_name").str.lower().map(canon)
+    state = state.fillna(col("ward_code").map(by_ward))
+    return state.fillna(col("state_name").replace("", np.nan)).fillna(default)
+
+def build_state_results(run_id, timestamp, uploaded_by, filename, mlos_df, layers, ref_df):
+    """Split one QC run into per-state run rows, rule rows and failing rows.
+
+    layers: [(layer_name, weight, checks, detail_df_or_None)]. A layer with no
+    detail (schema) applies to every state as reported for the whole file.
+    Rows with no identifiable state go to the file's state when it has only one.
+    """
+    states = resolve_states(mlos_df, ref_df, default="")
+    known = states[states != ""].unique()
+    default = known[0] if len(known) == 1 else "Unknown"
+    states = states.replace("", default)
+    run_rows, rule_rows, fail_rows = [], [], {}
+    for state in sorted(states.unique()):
+        n_state = int((states == state).sum())
+        pass_rates, failing_checks, issue_rows, frames = {}, 0, 0, []
+        for layer, weight, checks, detail in layers:
+            by_state = (detail is not None and not detail.empty and "state_name" in detail.columns)
+            if by_state:
+                d = detail[resolve_states(detail, ref_df, default) == state]
+                # Rule numbers can repeat across checks (Rule 9), so count by number + name
+                counts = d.groupby([d["Rule#"].astype(str), d["Rule"]]).size()
+            n_pass = 0
+            for c in checks:
+                if detail is None:
+                    n_fail, total = int(c["Failing Rows"]), c["Total Rows"]
+                elif by_state:
+                    n_fail, total = int(counts.get((str(c["Rule#"]), c["QC Check"]), 0)), n_state
+                else:
+                    n_fail, total = int(c["Failing Rows"]), n_state
+                status = "FAIL" if n_fail else "PASS"
+                n_pass += status == "PASS"
+                failing_checks += status == "FAIL"
+                rule_rows.append([run_id, timestamp, state, layer, str(c["Rule#"]), c["QC Check"],
+                                  n_fail, int(total), status])
+            pass_rates[layer] = (n_pass / len(checks)) if checks else 1.0
+            if by_state and not d.empty:
+                issue_rows += len(d)
+                base = ["Rule#", "Rule", "state_name", "lga_name", "ward_code",
+                        "settlement_name", "latitude", "longitude"]
+                extra = [c for c in d.columns if c not in base and c != d.columns[2]]
+                out = pd.DataFrame({"run_id": run_id, "layer": layer,
+                                    "rule": d["Rule#"].astype(str), "check": d["Rule"]})
+                for c in ["lga_name", "ward_code", "settlement_name", "latitude", "longitude"]:
+                    out[c] = d[c] if c in d.columns else ""
+                out["detail"] = [
+                    "; ".join(f"{k}: {v}" for k, v in zip(extra, vals)
+                              if str(v) not in ("", "nan", "None", "<NA>"))
+                    for vals in d[extra].itertuples(index=False, name=None)
+                ] if extra else ""
+                frames.append(out)
+        score = sum(pass_rates[l] * w * 100 for l, w, _, _ in layers)
+        run_rows.append([run_id, timestamp, state, uploaded_by, filename, n_state, round(score, 1)]
+                        + [round(pass_rates[l] * 100, 1) for l, _, _, _ in layers]
+                        + [failing_checks, issue_rows])
+        fail_rows[state] = pd.concat(frames) if frames else pd.DataFrame(columns=RESULTS_FAIL_COLS)
+    return run_rows, rule_rows, fail_rows
+
+def save_state_results(run_rows, rule_rows, fail_rows, message):
+    """Append run/rule rows and replace each state's failing rows, in one commit."""
+    import gzip
+    runs  = [[_cell(v) for v in r] for r in run_rows]
+    rules = [[_cell(v) for v in r] for r in rule_rows]
+    capped, fail_files = [], {}
+    for state, df in fail_rows.items():
+        if len(df) > RESULTS_FAIL_CAP:
+            capped.append(state)
+            df = df.head(RESULTS_FAIL_CAP)
+        fail_files[_fail_path(state)] = gzip.compress(
+            df[RESULTS_FAIL_COLS].to_csv(index=False).encode(), mtime=0)
+
+    def build(parent):
+        files = dict(fail_files)
+        for path, header, rows in [("results/runs.csv", RESULTS_RUNS_COLS, runs),
+                                   ("results/rules.csv", RESULTS_RULES_COLS, rules)]:
+            old = _gh_read(path, parent) if parent else None
+            files[path] = (old or b"") + _csv_bytes(header, rows, with_header=not old)
+        return files
+
+    _gh_commit(build, message)
+    return capped
+
+@st.cache_data(ttl=120, show_spinner=False)
+def load_results_table(path):
+    import gzip
+    data = _gh_read(path)
+    if not data:
+        return pd.DataFrame()
+    if path.endswith(".gz"):
+        data = gzip.decompress(data)
+    return pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
+
+def render_state_results():
+    st.markdown('<div class="sec-title">🌍 State Results — all users</div>', unsafe_allow_html=True)
+    if not results_store_configured():
+        st.info("Shared results are not set up. Add `github_token` to Streamlit secrets "
+                "(see README → Shared State Results).")
+        return
+    if st.button("🔄 Refresh", key="sr_refresh"):
+        load_results_table.clear()
+    try:
+        runs = load_results_table("results/runs.csv")
+    except Exception as e:
+        st.error(f"❌ Could not read shared results: {e}")
+        return
+    if runs.empty:
+        st.info("No QC runs have been saved yet.")
+        return
+
+    for c in ["rows", "weighted_score", "schema_pass_pct", "mlos_pass_pct", "settlement_pass_pct",
+              "boundary_pass_pct", "failing_checks", "issue_rows"]:
+        runs[c] = pd.to_numeric(runs[c], errors="coerce")
+    runs = runs.sort_values("timestamp")
+    latest = runs.drop_duplicates("state", keep="last").sort_values("state")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("States reporting", f"{latest['state'].nunique()}")
+    m2.metric("Runs saved", f"{runs['run_id'].nunique()}")
+    m3.metric("Average latest score", f"{latest['weighted_score'].mean():.1f}%")
+
+    st.markdown("**Latest run per state**")
+    show = latest[["state", "timestamp", "uploaded_by", "filename", "rows", "weighted_score",
+                   "failing_checks", "issue_rows"]].rename(columns={
+        "state": "State", "timestamp": "Last Run (WAT)", "uploaded_by": "Uploaded By",
+        "filename": "File", "rows": "Rows", "weighted_score": "Score %",
+        "failing_checks": "Failing Checks", "issue_rows": "Issue Rows"})
+    def score_colour(v):
+        if pd.isna(v): return ""
+        return ("background-color:#f0fdf4; color:#15803d" if v >= 80 else
+                "background-color:#fffbeb; color:#b45309" if v >= 60 else
+                "background-color:#fff1f2; color:#be123c")
+    st.dataframe(show.style.map(score_colour, subset=["Score %"]).format({"Score %": "{:.1f}"}),
+                 hide_index=True, use_container_width=True)
+
+    if runs.groupby("state").size().max() > 1:
+        st.markdown("**Score over time**")
+        trend = runs.pivot_table(index="timestamp", columns="state", values="weighted_score", aggfunc="last")
+        st.line_chart(trend)
+
+    st.markdown("---")
+    state = st.selectbox("State", latest["state"].tolist(), key="sr_state")
+    run = latest[latest["state"] == state].iloc[0]
+    st.caption(f"Latest run {run['timestamp']} by {run['uploaded_by'] or '—'} · {run['filename']} · "
+               f"{int(run['rows']):,} rows · score {run['weighted_score']:.1f}%")
+
+    rules = load_results_table("results/rules.csv")
+    if not rules.empty:
+        r = rules[(rules["run_id"] == run["run_id"]) & (rules["state"] == state)].copy()
+        r["failing_rows"] = pd.to_numeric(r["failing_rows"], errors="coerce").astype("Int64")
+        st.dataframe(r[["layer", "rule", "check", "failing_rows", "total_rows", "status"]].rename(columns={
+            "layer": "Layer", "rule": "Rule#", "check": "QC Check", "failing_rows": "Failing Rows",
+            "total_rows": "Total Rows", "status": "Status"}),
+            hide_index=True, use_container_width=True)
+
+    fails = load_results_table(_fail_path(state))
+    if fails.empty:
+        st.success("No failing rows saved for this state's latest run.")
+        return
+    f1, f2 = st.columns(2)
+    lgas  = f1.multiselect("LGA", sorted(fails["lga_name"].unique()), key="sr_lga")
+    rsel  = f2.multiselect("Rule", sorted(fails["rule"].unique()), key="sr_rule")
+    view = fails
+    if lgas: view = view[view["lga_name"].isin(lgas)]
+    if rsel: view = view[view["rule"].isin(rsel)]
+    st.caption(f"{len(view):,} of {len(fails):,} failing rows"
+               + (f" (saved rows are capped at {RESULTS_FAIL_CAP:,} per state)"
+                  if len(fails) >= RESULTS_FAIL_CAP else ""))
+    st.dataframe(view.drop(columns=["run_id"]), hide_index=True, use_container_width=True)
+    st.download_button("⬇️ Download failing rows (CSV)", view.to_csv(index=False).encode(),
+                       file_name=f"{state}_failing_rows.csv", mime="text/csv", key="sr_dl")
 
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
 def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
@@ -1279,6 +1569,13 @@ with st.sidebar:
     )
     if run_qc_btn and uploaded:
         st.session_state["submitted_key"] = (uploaded.name, getattr(uploaded, "size", None))
+    if results_store_configured():
+        uploader_name = st.text_input("Your name", key="uploader_name",
+                                      placeholder="firstname.surname")
+        share_results = st.checkbox("Share results with team", value=True, key="share_results",
+                                    help="Save this run's results to the shared State Results view")
+    else:
+        uploader_name, share_results = "", False
     st.markdown("---")
     st.markdown("#### 📋 QC Rules Reference")
     with st.expander("🔧 Auto Correct Rules", expanded=False):
@@ -1377,6 +1674,8 @@ Takeoffpoints are checked against the bundled health facility reference — no s
 - Per-rule issue drilldown with downloadable Excel reports
 - Full QC report (Excel) and email summary to the data team
         """)
+    st.markdown("---")
+    render_state_results()
     st.stop()
 
 # ─── Determine submitted state ────────────────────────────────────────────────────
@@ -1512,6 +1811,28 @@ settlement_score = _layer_pass_rate(settlement_checks) * LAYER_WEIGHTS["settleme
 boundary_score   = _layer_pass_rate(boundary_checks) * LAYER_WEIGHTS["boundary"]   * 100
 weighted_score   = schema_score + mlos_score + settlement_score + boundary_score
 
+# ── Save to shared State Results (once per QC run) ─────────────────────────────────
+if share_results and st.session_state.get("results_saved_key") != qc_cache_key:
+    _ts = datetime.now(WAT).strftime("%Y-%m-%d %H:%M")
+    try:
+        with st.spinner("Saving results to shared State Results…"):
+            _capped = save_state_results(*build_state_results(
+                uuid.uuid4().hex[:12], _ts, uploader_name.strip(), filename, mlos_df,
+                [("Schema",     LAYER_WEIGHTS["schema"],     schema_checks,     None),
+                 ("MLoS",       LAYER_WEIGHTS["mlos"],       mlos_checks,       mlos_detail),
+                 ("Settlement", LAYER_WEIGHTS["settlement"], settlement_checks, settlement_detail),
+                 ("Boundary",   LAYER_WEIGHTS["boundary"],   boundary_checks,   boundary_detail)],
+                boundary_ref),
+                message=f"QC results: {filename}" + (f" by {uploader_name.strip()}" if uploader_name.strip() else ""))
+        st.session_state["results_saved_key"] = qc_cache_key
+        load_results_table.clear()
+        st.toast("✅ Results saved to State Results")
+        if _capped:
+            st.warning(f"Failing rows for {', '.join(_capped)} were capped at {RESULTS_FAIL_CAP:,} "
+                       "in State Results; the full detail is in this session's tabs and downloads.")
+    except Exception as e:
+        st.warning(f"⚠️ Results could not be saved to State Results: {e}")
+
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
 st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_df):,} rows**")
 
@@ -1539,7 +1860,7 @@ else:
         unsafe_allow_html=True)
 
 # ─── TABS ─────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🔧 Auto Correct",
     "📊 QC Summary",
     "🏘️ MLoS Issues",
@@ -1547,6 +1868,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🗺️ Boundary Issues",
     "🔍 Raw Data",
     "📄 Generate Report",
+    "🌍 State Results",
 ])
 
 # ── Tab 2: QC Summary ─────────────────────────────────────────────────────────────
@@ -1938,3 +2260,7 @@ with tab7:
             st.error(f"❌ Failed to send email: {e}"
                      "\n\nEnsure `smtp_host`, `smtp_port`, `smtp_user`, and `smtp_pass` "
                      "are set in your Streamlit secrets.")
+
+# ── Tab 8: State Results ──────────────────────────────────────────────────────────
+with tab8:
+    render_state_results()
