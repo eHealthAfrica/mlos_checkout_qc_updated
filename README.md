@@ -25,7 +25,7 @@ A Streamlit app for running automated Quality Control (QC) checks on MLOS (Maste
 - **All reference data bundled** — ward boundaries, health facilities, and settlement extents ship with the app; no extra uploads
 - **Generate Report tab** — full QC verdict (CLEAN / FAILING) + downloadable Excel report
 - **Send QC Email** — sends summary to the data team on demand
-- **🌍 State Results** — every run is saved to the repo's `qc-results` branch, so anyone can compare the latest score per state, follow scores over time, and drill into a state's failing rows
+- **🌍 State Results** — every run is logged to a SQLite usage database, so anyone can compare the latest score per state, follow scores over time, and drill into a state's failing rows
 
 ---
 
@@ -64,12 +64,12 @@ Use the **sidebar uploader** to upload your MLOS checkout file. The tool accepts
 
 Click **▶️ Run QC** in the sidebar to start. QC does not run until the button is clicked.
 
-When shared results are set up, also enter **Your name** in the sidebar so the run is credited to you in State Results. Untick **Share results with team** for test runs you don't want saved.
+Also enter **Your name** in the sidebar so the run is credited to you in State Results. Untick **Share results with team** for test runs you don't want logged.
 
 Once submitted, the app:
 1. Runs **Auto Correct** on the MLoS data (pre-step before QC)
 2. Runs all 4 QC layers on the corrected data in sequence
-3. Saves the results to the shared State Results (if set up and **Share results with team** is ticked)
+3. Logs the run to the usage database (if **Share results with team** is ticked)
 
 A **labelled progress bar** tracks each step:
 
@@ -322,50 +322,33 @@ smtp_pass = "your-app-password"
 
 ---
 
-### 11. Shared State Results
+### 11. Shared State Results (Usage Database)
 
-Several people across different states use the app, so each QC run is saved to the **`qc-results` branch** of this GitHub repo, as one commit per run. Streamlit Cloud's own disk is wiped whenever the app restarts or sleeps, so results can't be kept there. The `qc-results` branch is separate from the branch the app is deployed from, so saving results never restarts the app.
+Several people across different states use the app, so each QC run is logged to a SQLite database, `usage_log.db`, next to `app.py`. The app creates it on startup. It holds data, not code, so it is git-ignored and never committed.
 
-**Saving.** After QC finishes, results are saved automatically, once per run. In the sidebar, uploaders enter **Your name** and can untick **Share results with team** for test runs. A file with several states is split into one result per state. Rows with no `state_name` get their state from `ward_code`, or from the file's state when the file has only one. State names follow the boundary reference spelling (e.g. `Fct`). If two people save at the same moment, the second save is rebuilt on top of the first, so neither is lost.
+> ⚠️ **Streamlit Community Cloud does not keep files.** The database is erased whenever the app restarts, redeploys, or wakes from sleep, so the history only builds up between restarts. Download the Excel file regularly to keep a copy. To keep the history permanently, run the app on a server with a permanent disk.
 
-| File on `qc-results` | Contents |
-|----------------------|----------|
-| `results/runs.csv` | One row per run and state: time (WAT), uploader, file, rows, weighted score, pass % per layer, failing checks, issue rows. Appended on every run (history) |
-| `results/rules.csv` | One row per run, state, and check: failing rows, total rows, PASS/FAIL |
-| `results/fail/<State>.csv.gz` | Failing rows from the state's **latest** run (layer, rule, LGA, ward, settlement, coordinates, and a `detail` column with the check's extra fields). Replaced on each run, capped at 40,000 rows per state; earlier versions stay in the branch's git history |
+**Logging.** After QC finishes, each run is logged once. In the sidebar, uploaders enter **Your name** and can untick **Share results with team** for test runs. A file with several states is split into one result per state. Rows with no `state_name` get their state from `ward_code`, or from the file's state when the file has only one. State names follow the boundary reference spelling (e.g. `Fct`).
+
+| Table | Contents |
+|-------|----------|
+| `usage_log` | One row per run: time (WAT), uploader, file, state(s), LGAs, file format, rows, checks run / passing / failing, weighted score, QC layers, issue rows |
+| `state_runs` | One row per run and state: rows, weighted score, pass % per layer, failing checks, issue rows |
+| `rule_results` | One row per run, state, and check: failing rows, total rows, PASS/FAIL |
+| `fail_rows` | Failing rows from each state's **latest** run (layer, rule, LGA, ward, settlement, coordinates, and a `detail` column with the check's extra fields); replaced when the state runs again |
 
 Per-state scores use the same weights as the dashboard; for a single-state file they match the dashboard exactly.
 
-**Viewing.** The **🌍 State Results** tab (and the start page, before any upload) shows the latest run per state with a colour-coded score, a score-over-time chart once a state has more than one run, and for a selected state its rule results and failing rows, filterable by LGA and rule and downloadable as CSV. Data refreshes every 2 minutes, or click **🔄 Refresh**.
+**Viewing.** The **🌍 State Results** tab (and the start page, before any upload) shows the latest run per state with a colour-coded score, a score-over-time chart once a state has more than one run, and for a selected state its rule results and failing rows, filterable by LGA and rule.
 
-**Downloading.** Everything saved can be downloaded from the app:
+**Downloading.**
 
 | Button | Contents |
 |--------|----------|
-| ⬇️ Download all state results (Excel) | Sheets **Latest by State**, **Run History** (every run, newest first), and **Rule Results** (pass/fail per check for every run) |
+| ⬇️ Download all state results (Excel) | Sheets **Latest by State**, **Run History** (newest first), **Rule Results** (pass/fail per check for every run), and **Usage Log** |
 | ⬇️ Download failing rows (CSV) | The selected state's failing rows from its latest run, with the LGA and rule filters applied |
 
-The same files can also be opened directly on GitHub by switching to the `qc-results` branch.
-
-**One-time setup.**
-
-1. On GitHub, go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens** and create a token:
-   - **Resource owner:** `eHealthAfrica`
-   - **Repository access:** only `mlos_checkout_qc_updated`
-   - **Permissions:** Repository → **Contents: Read and write**
-
-   If the organisation requires approval for fine-grained tokens, an org admin must approve it.
-2. Add the token to Streamlit secrets (Streamlit Cloud → App settings → Secrets, or `.streamlit/secrets.toml` locally — already git-ignored):
-
-```toml
-github_token = "github_pat_…"
-
-# Optional overrides
-# github_repo    = "eHealthAfrica/mlos_checkout_qc_updated"
-# results_branch = "qc-results"
-```
-
-The `qc-results` branch is created automatically on the first save. Without `github_token`, the app works as before. The name and share options are hidden, and State Results shows a setup notice.
+No setup or secrets are needed.
 
 ---
 
@@ -410,7 +393,8 @@ None of these extra packages are needed to run the app.
 
 ```
 app.py                       Streamlit app (all QC layers)
-requirements.txt             App dependencies (requests for shared State Results)
+requirements.txt             App dependencies
+usage_log.db                 Usage database, created at runtime (git-ignored)
 ward_boundary_ref.csv        Reference data (see Reference Data)
 ward_boundary_geom.csv.gz
 health_facility_ref.csv.gz
@@ -434,7 +418,7 @@ streamlit run app.py
 2. Go to [share.streamlit.io](https://share.streamlit.io)
 3. Connect your GitHub repo
 4. Set **Main file path** to `app.py`
-5. Add secrets under **App secrets**: the SMTP credentials (see [Send QC Email](#10-send-qc-email)) and `github_token` (see [Shared State Results](#11-shared-state-results))
+5. Add the SMTP credentials under **App secrets** (see [Send QC Email](#10-send-qc-email))
 6. Deploy!
 
 ---
