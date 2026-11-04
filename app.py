@@ -1006,6 +1006,19 @@ def load_results_table(path):
         data = gzip.decompress(data)
     return pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
 
+def build_state_results_xlsx(latest, runs, rules):
+    """Workbook of the shared results: latest run per state, run history, rule results."""
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        for name, df in [("Latest by State", latest), ("Run History", runs.sort_values("timestamp", ascending=False)),
+                         ("Rule Results", rules)]:
+            df.drop(columns=["run_id"], errors="ignore").to_excel(xw, sheet_name=name, index=False)
+            ws = xw.sheets[name]
+            for i, col in enumerate(df.drop(columns=["run_id"], errors="ignore").columns, 1):
+                ws.column_dimensions[get_column_letter(i)].width = min(max(len(str(col)) + 2, 12), 40)
+            ws.freeze_panes = "A2"
+    return buf.getvalue()
+
 def render_state_results():
     st.markdown('<div class="sec-title">🌍 State Results — all users</div>', unsafe_allow_html=True)
     if not results_store_configured():
@@ -1052,6 +1065,14 @@ def render_state_results():
         st.markdown("**Score over time**")
         trend = runs.pivot_table(index="timestamp", columns="state", values="weighted_score", aggfunc="last")
         st.line_chart(trend)
+
+    rules_all = load_results_table("results/rules.csv")
+    st.download_button(
+        "⬇️ Download all state results (Excel)",
+        build_state_results_xlsx(latest, runs, rules_all),
+        file_name=f"MLoS_State_Results_{datetime.now(WAT):%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="sr_dl_all", help="Latest run per state, full run history, and rule results for every run")
 
     st.markdown("---")
     state = st.selectbox("State", latest["state"].tolist(), key="sr_state")

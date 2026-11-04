@@ -336,7 +336,16 @@ Several people across different states use the app, so each QC run is saved to t
 
 Per-state scores use the same weights as the dashboard; for a single-state file they match the dashboard exactly.
 
-**Viewing.** The **🌍 State Results** tab (and the start page, before any upload) shows the latest run per state with a colour-coded score, a score-over-time chart once a state has more than one run, and for a selected state its rule results and failing rows, filterable by LGA and rule and downloadable as CSV. Data refreshes every 2 minutes, or click **🔄 Refresh**. The files can also be opened directly on GitHub by switching to the `qc-results` branch.
+**Viewing.** The **🌍 State Results** tab (and the start page, before any upload) shows the latest run per state with a colour-coded score, a score-over-time chart once a state has more than one run, and for a selected state its rule results and failing rows, filterable by LGA and rule and downloadable as CSV. Data refreshes every 2 minutes, or click **🔄 Refresh**.
+
+**Downloading.** Everything saved can be downloaded from the app:
+
+| Button | Contents |
+|--------|----------|
+| ⬇️ Download all state results (Excel) | Sheets **Latest by State**, **Run History** (every run, newest first), and **Rule Results** (pass/fail per check for every run) |
+| ⬇️ Download failing rows (CSV) | The selected state's failing rows from its latest run, with the LGA and rule filters applied |
+
+The same files can also be opened directly on GitHub by switching to the `qc-results` branch.
 
 **One-time setup.**
 
