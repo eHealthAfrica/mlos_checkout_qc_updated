@@ -7,8 +7,10 @@ import tempfile
 import os
 import re
 import difflib
+import zlib
+import uuid
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -353,6 +355,95 @@ def load_ward_geoms():
     shapely.prepare(geom_df["geometry"].values)
     return geom_df
 
+# ─── Settlement Extent Reference (GRID3 v4.1) ──────────────────────────────────
+# GRID3 Nigeria settlement extents rasterised to a 25 m Web Mercator grid, stored as
+# zlib-compressed 256×256 tiles (2 bits per cell). Cell values index EXTENT_TYPES.
+SETTLEMENT_EXTENT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settlement_extent_mask.npz")
+EXTENT_TYPES = np.array(["", "Hamlet", "Small Settlement Area", "Built-up Area"])
+EXTENT_BUFFER_M = 50     # a settlement must be on, or within this distance of, an extent
+EXTENT_SEARCH_M = 500    # how far to look when reporting the nearest extent for failures
+
+class SettlementExtentMask:
+    def __init__(self, path):
+        z = np.load(path)
+        self.x0, self.y1, self.res, tile, self.tx, self.ty = z["meta"]
+        self.tile = int(tile)
+        self.tx, self.ty = int(self.tx), int(self.ty)
+        offsets = z["offsets"]
+        self.index = {int(k): (offsets[i], offsets[i + 1]) for i, k in enumerate(z["keys"])}
+        self.data  = z["data"].tobytes()
+        self.cache = {}
+
+    def _tile(self, key):
+        if key not in self.cache:
+            if key not in self.index:
+                self.cache[key] = None
+            else:
+                a, b = self.index[key]
+                p = np.frombuffer(zlib.decompress(self.data[a:b]), dtype=np.uint8)
+                p = p.reshape(self.tile, self.tile // 4)
+                self.cache[key] = np.stack([(p >> s) & 3 for s in (0, 2, 4, 6)], axis=-1
+                                           ).reshape(self.tile, self.tile)
+        return self.cache[key]
+
+    def cells(self, lat, lon):
+        """Grid row/column of each WGS84 point."""
+        R = 6378137.0
+        x = R * np.radians(lon)
+        y = R * np.log(np.tan(np.pi / 4 + np.radians(lat) / 2))
+        return (np.floor((self.y1 - y) / self.res).astype(np.int64),
+                np.floor((x - self.x0) / self.res).astype(np.int64))
+
+    def lookup(self, rows, cols):
+        """Extent type code (0–3) at each grid cell; 0 outside the grid."""
+        out = np.zeros(rows.shape, dtype=np.uint8)
+        T = self.tile
+        inside = (rows >= 0) & (cols >= 0) & (rows < self.ty * T) & (cols < self.tx * T)
+        r, c = rows[inside], cols[inside]
+        key = (r // T) * self.tx + c // T
+        vals = np.zeros(len(r), dtype=np.uint8)
+        order = np.argsort(key, kind="stable")
+        uk, starts = np.unique(key[order], return_index=True)
+        for k, idx in zip(uk, np.split(order, starts[1:])):
+            t = self._tile(int(k))
+            if t is not None:
+                vals[idx] = t[r[idx] % T, c[idx] % T]
+        out[inside] = vals
+        return out
+
+    def nearest(self, lat, lon, radius_m):
+        """Distance (m, cell precision) to and type of the nearest extent cell within
+        radius_m of each point; inf / 0 where none."""
+        rows, cols = self.cells(lat, lon)
+        scale = self.res * np.cos(np.radians(lat))          # ground metres per cell
+        n = int(np.ceil(radius_m / scale.min())) if len(lat) else 0
+        dy, dx = np.mgrid[-n:n + 1, -n:n + 1]
+        dy, dx = dy.ravel(), dx.ravel()
+        cell_d = np.hypot(dy, dx)
+        order = np.argsort(cell_d, kind="stable")
+        dy, dx, cell_d = dy[order], dx[order], cell_d[order]
+        best_d = np.full(len(lat), np.inf)
+        best_t = np.zeros(len(lat), dtype=np.uint8)
+        todo = np.arange(len(lat))
+        for oy, ox, cd in zip(dy, dx, cell_d):
+            if not len(todo):
+                break
+            d = cd * scale[todo]
+            within = d <= radius_m
+            todo = todo[within]
+            if not len(todo):
+                continue
+            t = self.lookup(rows[todo] + oy, cols[todo] + ox)
+            hit = t > 0
+            best_d[todo[hit]] = cd * scale[todo[hit]]
+            best_t[todo[hit]] = t[hit]
+            todo = todo[~hit]
+        return best_d, best_t
+
+@st.cache_resource(show_spinner=False)
+def load_settlement_extents():
+    return SettlementExtentMask(SETTLEMENT_EXTENT_PATH) if os.path.exists(SETTLEMENT_EXTENT_PATH) else None
+
 # ─── Health Facility Reference (takeoffpoints) ──────────────────────────────────
 HEALTH_FACILITY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "health_facility_ref.csv.gz")
 
@@ -552,7 +643,7 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, geom_df: pd.D
     return checks, detail_df
 
 # ─── QC Engine — Settlement ──────────────────────────────────────────────────────
-def run_settlement_qc(mlos: pd.DataFrame):
+def run_settlement_qc(mlos: pd.DataFrame, extents=None):
     import numpy as np
     checks, details = [], []
     total  = len(mlos)
@@ -683,7 +774,254 @@ def run_settlement_qc(mlos: pd.DataFrame):
             "nearest other settlement is between 20 and 30 metres away",
             (nearest_d >= 20) & (nearest_d < 30))
 
+    # SQ6 — settlement must sit on, or within EXTENT_BUFFER_M of, a GRID3 settlement
+    # extent. Points off any extent are likely misplaced or in empty land.
+    if extents is not None and "latitude" in mlos.columns and "longitude" in mlos.columns:
+        lat   = pd.to_numeric(mlos["latitude"],  errors="coerce").values
+        lon   = pd.to_numeric(mlos["longitude"], errors="coerce").values
+        valid = np.flatnonzero(~np.isnan(lat) & ~np.isnan(lon) & (lat != 0) & (lon != 0))
+        ext_d, _ = extents.nearest(lat[valid], lon[valid], EXTENT_BUFFER_M)
+        fail = np.zeros(len(mlos), dtype=bool)
+        fail[valid[np.isinf(ext_d)]] = True
+        add("SQ6", f"Not on Settlement Extent (> {EXTENT_BUFFER_M} m)",
+            f"settlement point is more than {EXTENT_BUFFER_M} metres from any GRID3 settlement extent",
+            pd.Series(fail, index=mlos.index),
+            ["ward_code", "settlement_name", "latitude", "longitude"])
+        if fail.any():
+            pos = np.flatnonzero(fail)
+            far_d, far_t = extents.nearest(lat[pos], lon[pos], EXTENT_SEARCH_M)
+            details[-1]["Nearest Extent (m)"] = [f"> {EXTENT_SEARCH_M}" if np.isinf(d) else str(int(round(d, -1)))
+                                                 for d in far_d]
+            details[-1]["Nearest Extent Type"] = EXTENT_TYPES[far_t]
+
     return checks, pd.concat(details) if details else pd.DataFrame()
+
+# ─── Usage Tracking Database (SQLite) ──────────────────────────────────────────────
+# Every QC run is logged to a local SQLite database so usage and results from all
+# states and users can be compared in State Results. Tables:
+#   usage_log      one row per run: file, states, LGAs, format, checks, score, issue rows
+#   state_runs     one row per (run, state): score, layer pass rates, issue counts
+#   rule_results   one row per (run, state, rule): failing rows and status
+#   fail_rows      failing rows from each state's most recent run (replaced each run)
+# On Streamlit Community Cloud the file is lost when the app restarts or sleeps.
+WAT = timezone(timedelta(hours=1))
+USAGE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_log.db")
+USAGE_LOG_COLS = ["run_id", "timestamp", "uploaded_by", "filename", "state_name", "lga_names",
+                  "file_format", "mlos_rows", "total_checks", "checks_passing", "checks_failing",
+                  "weighted_score", "qc_layers", "issue_rows"]
+RESULTS_RUNS_COLS  = ["run_id", "timestamp", "state", "uploaded_by", "filename", "rows",
+                      "weighted_score", "schema_pass_pct", "mlos_pass_pct",
+                      "settlement_pass_pct", "boundary_pass_pct", "failing_checks", "issue_rows"]
+RESULTS_RULES_COLS = ["run_id", "timestamp", "state", "layer", "rule", "check",
+                      "failing_rows", "total_rows", "status"]
+RESULTS_FAIL_COLS  = ["run_id", "layer", "rule", "check", "lga_name", "ward_code",
+                      "settlement_name", "latitude", "longitude", "detail"]
+USAGE_TABLES = {"usage_log": USAGE_LOG_COLS, "state_runs": RESULTS_RUNS_COLS,
+                "rule_results": RESULTS_RULES_COLS, "fail_rows": ["state"] + RESULTS_FAIL_COLS}
+
+def _usage_db():
+    return sqlite3.connect(USAGE_DB_PATH, timeout=30)
+
+def init_usage_db():
+    """Create the usage tracking tables if they don't exist."""
+    with _usage_db() as conn:
+        for table, cols in USAGE_TABLES.items():
+            conn.execute(f'CREATE TABLE IF NOT EXISTS {table} ({", ".join(f"{c!r} TEXT" for c in cols)})')
+        conn.execute("CREATE INDEX IF NOT EXISTS fail_rows_state ON fail_rows (state)")
+
+def _cell(v):
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return ""
+    if isinstance(v, (np.integer, np.floating)):
+        v = v.item()
+    return v if isinstance(v, (int, float)) else str(v)
+
+def resolve_states(df, ref_df, default="Unknown"):
+    """State per row, spelled as in the boundary reference (case-insensitive).
+    Blank or unknown state names fall back to the state of the row's ward_code,
+    then to `default`."""
+    col = lambda c: (df[c].fillna("").astype(str).str.strip() if c in df.columns
+                     else pd.Series("", index=df.index))
+    canon, by_ward = {}, {}
+    if not ref_df.empty:
+        canon   = {n.lower(): n for n in ref_df["state_name"].unique()}
+        by_ward = dict(zip(ref_df["ward_code"], ref_df["state_name"]))
+    state = col("state_name").str.lower().map(canon)
+    state = state.fillna(col("ward_code").map(by_ward))
+    return state.fillna(col("state_name").replace("", np.nan)).fillna(default)
+
+def build_state_results(run_id, timestamp, uploaded_by, filename, mlos_df, layers, ref_df):
+    """Split one QC run into per-state run rows, rule rows and failing rows.
+
+    layers: [(layer_name, weight, checks, detail_df_or_None)]. A layer with no
+    detail (schema) applies to every state as reported for the whole file.
+    Rows with no identifiable state go to the file's state when it has only one.
+    """
+    states = resolve_states(mlos_df, ref_df, default="")
+    known = states[states != ""].unique()
+    default = known[0] if len(known) == 1 else "Unknown"
+    states = states.replace("", default)
+    run_rows, rule_rows, fail_rows = [], [], {}
+    for state in sorted(states.unique()):
+        n_state = int((states == state).sum())
+        pass_rates, failing_checks, issue_rows, frames = {}, 0, 0, []
+        for layer, weight, checks, detail in layers:
+            by_state = (detail is not None and not detail.empty and "state_name" in detail.columns)
+            if by_state:
+                d = detail[resolve_states(detail, ref_df, default) == state]
+                # Rule numbers can repeat across checks (Rule 9), so count by number + name
+                counts = d.groupby([d["Rule#"].astype(str), d["Rule"]]).size()
+            n_pass = 0
+            for c in checks:
+                if detail is None:
+                    n_fail, total = int(c["Failing Rows"]), c["Total Rows"]
+                elif by_state:
+                    n_fail, total = int(counts.get((str(c["Rule#"]), c["QC Check"]), 0)), n_state
+                else:
+                    n_fail, total = int(c["Failing Rows"]), n_state
+                status = "FAIL" if n_fail else "PASS"
+                n_pass += status == "PASS"
+                failing_checks += status == "FAIL"
+                rule_rows.append([run_id, timestamp, state, layer, str(c["Rule#"]), c["QC Check"],
+                                  n_fail, int(total), status])
+            pass_rates[layer] = (n_pass / len(checks)) if checks else 1.0
+            if by_state and not d.empty:
+                issue_rows += len(d)
+                base = ["Rule#", "Rule", "state_name", "lga_name", "ward_code",
+                        "settlement_name", "latitude", "longitude"]
+                extra = [c for c in d.columns if c not in base and c != d.columns[2]]
+                out = pd.DataFrame({"run_id": run_id, "layer": layer,
+                                    "rule": d["Rule#"].astype(str), "check": d["Rule"]})
+                for c in ["lga_name", "ward_code", "settlement_name", "latitude", "longitude"]:
+                    out[c] = d[c] if c in d.columns else ""
+                out["detail"] = [
+                    "; ".join(f"{k}: {v}" for k, v in zip(extra, vals)
+                              if str(v) not in ("", "nan", "None", "<NA>"))
+                    for vals in d[extra].itertuples(index=False, name=None)
+                ] if extra else ""
+                frames.append(out)
+        score = sum(pass_rates[l] * w * 100 for l, w, _, _ in layers)
+        run_rows.append([run_id, timestamp, state, uploaded_by, filename, n_state, round(score, 1)]
+                        + [round(pass_rates[l] * 100, 1) for l, _, _, _ in layers]
+                        + [failing_checks, issue_rows])
+        fail_rows[state] = pd.concat(frames) if frames else pd.DataFrame(columns=RESULTS_FAIL_COLS)
+    return run_rows, rule_rows, fail_rows
+
+def save_state_results(usage_row, run_rows, rule_rows, fail_rows):
+    """Log one run: append usage/run/rule rows and replace each state's failing rows."""
+    def insert(conn, table, rows):
+        cols = USAGE_TABLES[table]
+        conn.executemany(f'INSERT INTO {table} VALUES ({", ".join("?" * len(cols))})',
+                         [[None if v == "" else str(v) for v in map(_cell, r)] for r in rows])
+    with _usage_db() as conn:
+        insert(conn, "usage_log", [usage_row])
+        insert(conn, "state_runs", run_rows)
+        insert(conn, "rule_results", rule_rows)
+        for state, df in fail_rows.items():
+            conn.execute("DELETE FROM fail_rows WHERE state = ?", (state,))
+            insert(conn, "fail_rows", ([state] + list(r) for r in
+                                       df[RESULTS_FAIL_COLS].itertuples(index=False, name=None)))
+
+def load_results_table(table, state=None):
+    """Read a usage table (optionally one state's failing rows) as strings."""
+    with _usage_db() as conn:
+        df = pd.read_sql_query(f"SELECT * FROM {table}" + (" WHERE state = ?" if state else ""),
+                               conn, params=(state,) if state else None)
+    return df.fillna("").astype(str)
+
+def build_state_results_xlsx(latest, runs, rules, usage):
+    """Workbook of the shared results: latest run per state, run history, rule results, usage log."""
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        for name, df in [("Latest by State", latest), ("Run History", runs.sort_values("timestamp", ascending=False)),
+                         ("Rule Results", rules), ("Usage Log", usage.sort_values("timestamp", ascending=False))]:
+            df.drop(columns=["run_id"], errors="ignore").to_excel(xw, sheet_name=name, index=False)
+            ws = xw.sheets[name]
+            for i, col in enumerate(df.drop(columns=["run_id"], errors="ignore").columns, 1):
+                ws.column_dimensions[get_column_letter(i)].width = min(max(len(str(col)) + 2, 12), 40)
+            ws.freeze_panes = "A2"
+    return buf.getvalue()
+
+def render_state_results():
+    st.markdown('<div class="sec-title">🌍 State Results — all users</div>', unsafe_allow_html=True)
+    try:
+        runs = load_results_table("state_runs")
+    except Exception as e:
+        st.error(f"❌ Could not read shared results: {e}")
+        return
+    if runs.empty:
+        st.info("No QC runs have been saved yet.")
+        return
+
+    for c in ["rows", "weighted_score", "schema_pass_pct", "mlos_pass_pct", "settlement_pass_pct",
+              "boundary_pass_pct", "failing_checks", "issue_rows"]:
+        runs[c] = pd.to_numeric(runs[c], errors="coerce")
+    runs = runs.sort_values("timestamp")
+    latest = runs.drop_duplicates("state", keep="last").sort_values("state")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("States reporting", f"{latest['state'].nunique()}")
+    m2.metric("Runs saved", f"{runs['run_id'].nunique()}")
+    m3.metric("Average latest score", f"{latest['weighted_score'].mean():.1f}%")
+
+    st.markdown("**Latest run per state**")
+    show = latest[["state", "timestamp", "uploaded_by", "filename", "rows", "weighted_score",
+                   "failing_checks", "issue_rows"]].rename(columns={
+        "state": "State", "timestamp": "Last Run (WAT)", "uploaded_by": "Uploaded By",
+        "filename": "File", "rows": "Rows", "weighted_score": "Score %",
+        "failing_checks": "Failing Checks", "issue_rows": "Issue Rows"})
+    def score_colour(v):
+        if pd.isna(v): return ""
+        return ("background-color:#f0fdf4; color:#15803d" if v >= 80 else
+                "background-color:#fffbeb; color:#b45309" if v >= 60 else
+                "background-color:#fff1f2; color:#be123c")
+    st.dataframe(show.style.map(score_colour, subset=["Score %"]).format({"Score %": "{:.1f}"}),
+                 hide_index=True, use_container_width=True)
+
+    if runs.groupby("state").size().max() > 1:
+        st.markdown("**Score over time**")
+        trend = runs.pivot_table(index="timestamp", columns="state", values="weighted_score", aggfunc="last")
+        st.line_chart(trend)
+
+    rules_all = load_results_table("rule_results")
+    st.download_button(
+        "⬇️ Download all state results (Excel)",
+        build_state_results_xlsx(latest, runs, rules_all, load_results_table("usage_log")),
+        file_name=f"MLoS_State_Results_{datetime.now(WAT):%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="sr_dl_all", help="Latest run per state, run history, rule results for every run, and the usage log")
+
+    st.markdown("---")
+    state = st.selectbox("State", latest["state"].tolist(), key="sr_state")
+    run = latest[latest["state"] == state].iloc[0]
+    st.caption(f"Latest run {run['timestamp']} by {run['uploaded_by'] or '—'} · {run['filename']} · "
+               f"{int(run['rows']):,} rows · score {run['weighted_score']:.1f}%")
+
+    rules = load_results_table("rule_results")
+    if not rules.empty:
+        r = rules[(rules["run_id"] == run["run_id"]) & (rules["state"] == state)].copy()
+        r["failing_rows"] = pd.to_numeric(r["failing_rows"], errors="coerce").astype("Int64")
+        st.dataframe(r[["layer", "rule", "check", "failing_rows", "total_rows", "status"]].rename(columns={
+            "layer": "Layer", "rule": "Rule#", "check": "QC Check", "failing_rows": "Failing Rows",
+            "total_rows": "Total Rows", "status": "Status"}),
+            hide_index=True, use_container_width=True)
+
+    fails = load_results_table("fail_rows", state).drop(columns=["state"])
+    if fails.empty:
+        st.success("No failing rows saved for this state's latest run.")
+        return
+    f1, f2 = st.columns(2)
+    lgas  = f1.multiselect("LGA", sorted(fails["lga_name"].unique()), key="sr_lga")
+    rsel  = f2.multiselect("Rule", sorted(fails["rule"].unique()), key="sr_rule")
+    view = fails
+    if lgas: view = view[view["lga_name"].isin(lgas)]
+    if rsel: view = view[view["rule"].isin(rsel)]
+    st.caption(f"{len(view):,} of {len(fails):,} failing rows")
+    st.dataframe(view.drop(columns=["run_id"]), hide_index=True, use_container_width=True)
+    st.download_button("⬇️ Download failing rows (CSV)", view.to_csv(index=False).encode(),
+                       file_name=f"{state}_failing_rows.csv", mime="text/csv", key="sr_dl")
+
+init_usage_db()
 
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
 def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
@@ -1169,6 +1507,9 @@ with st.sidebar:
     )
     if run_qc_btn and uploaded:
         st.session_state["submitted_key"] = (uploaded.name, getattr(uploaded, "size", None))
+    uploader_name = st.text_input("Your name", key="uploader_name", placeholder="firstname.surname")
+    share_results = st.checkbox("Share results with team", value=True, key="share_results",
+                                help="Log this run to the usage database shown in State Results")
     st.markdown("---")
     st.markdown("#### 📋 QC Rules Reference")
     with st.expander("🔧 Auto Correct Rules", expanded=False):
@@ -1220,6 +1561,7 @@ with st.sidebar:
 | SQ3 | No two settlements may share identical coordinates (stacked) |
 | SQ4 | Nearest other settlement must not be < 20 m away (proximity cluster) |
 | SQ5 | Nearest other settlement must not be 20–30 m away (proximity cluster) |
+| SQ6 | Settlement must be on, or within 50 m of, a GRID3 settlement extent |
         """)
     with st.expander("🗺️ Boundary Check Rules", expanded=False):
         st.markdown("""
@@ -1258,7 +1600,7 @@ Takeoffpoints are checked against the bundled health facility reference — no s
 **QC Layers:**
 - 🔎 **Schema Alignment** (S1) — verifies all required columns are present
 - 🏘️ **MLoS Rules** (1–12) — data integrity checks, including takeoffpoint vs. health facility
-- 📐 **Settlement QC** (SQ1–SQ5) — duplicate, coordinate, stacking, and proximity checks
+- 📐 **Settlement QC** (SQ1–SQ6) — duplicate, coordinate, stacking, proximity, and settlement extent checks
 - 🗺️ **Boundary Checks** (B0–B3) — ward code, spatial ward match, and state name validation against admin boundary reference
 
 **Outputs:**
@@ -1266,6 +1608,8 @@ Takeoffpoints are checked against the bundled health facility reference — no s
 - Per-rule issue drilldown with downloadable Excel reports
 - Full QC report (Excel) and email summary to the data team
         """)
+    st.markdown("---")
+    render_state_results()
     st.stop()
 
 # ─── Determine submitted state ────────────────────────────────────────────────────
@@ -1292,6 +1636,7 @@ qc_cache_key = _current_key
 boundary_ref = load_boundary_refs()
 boundary_geom = load_ward_geoms()
 hf_by_ward = load_health_facilities()
+settlement_extents = load_settlement_extents()
 
 if (st.session_state.get("qc_cache_key") == qc_cache_key
         and "mlos_df_corrected" in st.session_state):
@@ -1340,7 +1685,7 @@ else:
         # ── Step 3 / 4: Settlement QC ────────────────────────────────────
         qc_bar.progress(51, text="📐 Step 3 / 4 — Settlement QC…")
         st.write("📐 Step 3 / 4 — Settlement QC")
-        settlement_checks, settlement_detail = run_settlement_qc(mlos_df)
+        settlement_checks, settlement_detail = run_settlement_qc(mlos_df, settlement_extents)
         sq_fail = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
         st.write(f"   {'❌' if sq_fail else '✅'} Settlement: "
                  f"{len(settlement_checks) - sq_fail}/{len(settlement_checks)} checks passed")
@@ -1400,6 +1745,30 @@ settlement_score = _layer_pass_rate(settlement_checks) * LAYER_WEIGHTS["settleme
 boundary_score   = _layer_pass_rate(boundary_checks) * LAYER_WEIGHTS["boundary"]   * 100
 weighted_score   = schema_score + mlos_score + settlement_score + boundary_score
 
+# ── Log to the usage database (once per QC run) ─────────────────────────────────────
+if share_results and st.session_state.get("results_saved_key") != qc_cache_key:
+    _ts     = datetime.now(WAT).strftime("%Y-%m-%d %H:%M")
+    _run_id = uuid.uuid4().hex[:12]
+    _layers = [("Schema",     LAYER_WEIGHTS["schema"],     schema_checks,     None),
+               ("MLoS",       LAYER_WEIGHTS["mlos"],       mlos_checks,       mlos_detail),
+               ("Settlement", LAYER_WEIGHTS["settlement"], settlement_checks, settlement_detail),
+               ("Boundary",   LAYER_WEIGHTS["boundary"],   boundary_checks,   boundary_detail)]
+    _states = sorted(set(resolve_states(mlos_df, boundary_ref, "")) - {""})
+    _lgas   = (sorted(set(mlos_df["lga_name"].fillna("").astype(str).str.strip()) - {""})
+               if "lga_name" in mlos_df.columns else [])
+    _usage_row = [_run_id, _ts, uploader_name.strip(), filename, ", ".join(_states), ", ".join(_lgas),
+                  filename.rsplit(".", 1)[-1].lower() if "." in filename else "unknown",
+                  len(mlos_df), len(all_checks), n_pass, n_fail, round(weighted_score, 1),
+                  ", ".join(l for l, _, c, _ in _layers if c),
+                  mlos_fail_rows + settlement_fail_rows + boundary_fail_rows]
+    try:
+        save_state_results(_usage_row, *build_state_results(
+            _run_id, _ts, uploader_name.strip(), filename, mlos_df, _layers, boundary_ref))
+        st.session_state["results_saved_key"] = qc_cache_key
+        st.toast("✅ Run logged to State Results")
+    except Exception as e:
+        st.warning(f"⚠️ This run could not be logged to the usage database: {e}")
+
 # ─── FILE INFO + METRICS ──────────────────────────────────────────────────────────
 st.success(f"✅ Loaded **{filename}** — MLoS: **{len(mlos_df):,} rows**")
 
@@ -1427,7 +1796,7 @@ else:
         unsafe_allow_html=True)
 
 # ─── TABS ─────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🔧 Auto Correct",
     "📊 QC Summary",
     "🏘️ MLoS Issues",
@@ -1435,6 +1804,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🗺️ Boundary Issues",
     "🔍 Raw Data",
     "📄 Generate Report",
+    "🌍 State Results",
 ])
 
 # ── Tab 2: QC Summary ─────────────────────────────────────────────────────────────
@@ -1826,3 +2196,7 @@ with tab7:
             st.error(f"❌ Failed to send email: {e}"
                      "\n\nEnsure `smtp_host`, `smtp_port`, `smtp_user`, and `smtp_pass` "
                      "are set in your Streamlit secrets.")
+
+# ── Tab 8: State Results ──────────────────────────────────────────────────────────
+with tab8:
+    render_state_results()

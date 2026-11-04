@@ -14,15 +14,18 @@ A Streamlit app for running automated Quality Control (QC) checks on MLOS (Maste
 - **4 QC Layers** run automatically on submission:
   - 🔎 **Schema Alignment** — verifies all required columns are present
   - 🏘️ **MLoS Rules** — data integrity checks, including takeoffpoint vs. health facility (Rules 1–12)
-  - 📐 **Settlement QC** — duplicate, coordinate, stacking, and proximity checks
+  - 📐 **Settlement QC** — duplicate, coordinate, stacking, proximity, and settlement extent checks
   - 🗺️ **Boundary Checks** — null ward code detection, ward code existence, ward code vs. ward boundary polygon (spatial join), and state name validation against the 9,406-ward admin boundary reference (Sept 2026)
 - **Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score** displayed on the dashboard
 - Per-rule issue drilldown with expandable row-level detail tables
 - **MLoS Issues — Longitudinal View** — one row per settlement, Yes/No per rule column, downloadable
 - **Boundary Issues** — includes reference ward code, ward name, LGA, and state columns for comparison, plus the ward each settlement actually falls in
 - **Proximity clusters** — settlements under 20 m and 20–30 m from their nearest neighbour, grouped by cluster
+- **Settlement extent check** — flags settlement points more than 50 m from any GRID3 settlement extent, with the distance to and type of the nearest extent
+- **All reference data bundled** — ward boundaries, health facilities, and settlement extents ship with the app; no extra uploads
 - **Generate Report tab** — full QC verdict (CLEAN / FAILING) + downloadable Excel report
 - **Send QC Email** — sends summary to the data team on demand
+- **🌍 State Results** — every run is logged to a SQLite usage database, so anyone can compare the latest score per state, follow scores over time, and drill into a state's failing rows
 
 ---
 
@@ -45,10 +48,11 @@ All formats get the same full set of checks.
 | 🔧 Auto Correct | Correction log + full corrected MLoS download (always available) |
 | 📊 QC Summary | Weighted QC Score breakdown, pass/fail per rule, failing row counts, Pass Rate %, Fail Rate % |
 | 🏘️ MLoS Issues | Row-level drilldown per failing rule + Longitudinal View (Yes/No per rule) |
-| 📐 Settlement QC | Row-level drilldown for each failing settlement check (duplicates, coordinates, proximity) + download |
+| 📐 Settlement QC | Row-level drilldown for each failing settlement check (duplicates, coordinates, proximity, settlement extent) + download |
 | 🗺️ Boundary Issues | Null/missing ward codes (B0), unmatched ward codes (B1), ward code vs. spatially-joined boundary ward mismatches (B2), state name mismatches (B3), with boundary reference comparison columns |
 | 🔍 Raw Data | Filterable view of the full MLoS dataset |
 | 📄 Generate Report | Full QC verdict, Excel report download, and Send Email button |
+| 🌍 State Results | Shared results from all users: latest run per state, score trend, and per-state rule results and failing rows (also shown on the start page before any upload) |
 
 ---
 
@@ -60,9 +64,12 @@ Use the **sidebar uploader** to upload your MLOS checkout file. The tool accepts
 
 Click **▶️ Run QC** in the sidebar to start. QC does not run until the button is clicked.
 
+Also enter **Your name** in the sidebar so the run is credited to you in State Results. Untick **Share results with team** for test runs you don't want logged.
+
 Once submitted, the app:
 1. Runs **Auto Correct** on the MLoS data (pre-step before QC)
 2. Runs all 4 QC layers on the corrected data in sequence
+3. Logs the run to the usage database (if **Share results with team** is ticked)
 
 A **labelled progress bar** tracks each step:
 
@@ -111,8 +118,8 @@ Checks whether the uploaded file contains all required columns. Schema failures 
 | `settlement_name` | Settlement name | Base identifier, Rule 1 |
 | `primarysettlement_name` | Primary settlement name | Nullable (can be null) |
 | `alternate_name` | Alternate settlement name | Nullable (can be null) |
-| `latitude` | GPS latitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, B2 |
-| `longitude` | GPS longitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, B2 |
+| `latitude` | GPS latitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, SQ6, B2 |
+| `longitude` | GPS longitude | Rules 1, SQ2, SQ2b, SQ3, SQ4, SQ5, SQ6, B2 |
 | `security_compromised` | Y or N | Rules 1, 3 |
 | `accessibility_status` | Fully Accessible / Partially Accessible / Inaccessible | Rules 1, 4, 5 |
 | `reasons_for_inaccessibility` | Reason text | Rule 5, Auto Correct (Nullable — can be null for Fully Accessible settlements) |
@@ -182,7 +189,7 @@ So `PHC Ojede` matches `Ojede Primary Health Center`. Failing rows get a **Close
 
 ---
 
-### 5. Settlement QC Checks (Rules SQ1–SQ5)
+### 5. Settlement QC Checks (Rules SQ1–SQ6)
 
 Spatial integrity checks applied to the MLoS settlement records.
 
@@ -194,8 +201,11 @@ Spatial integrity checks applied to the MLoS settlement records.
 | SQ3 | Stacked Coordinates | No two settlements may share identical `latitude`/`longitude` coordinates |
 | SQ4 | Settlements Too Close (< 20 m) | Nearest other settlement is less than 20 metres away (Haversine distance) |
 | SQ5 | Settlements Too Close (20–30 m) | Nearest other settlement is 20–30 metres away (Haversine distance) |
+| SQ6 | Not on Settlement Extent (> 50 m) | Settlement point must be on, or within 50 metres of, a GRID3 settlement extent |
 
 SQ4 and SQ5 rows are banded by each settlement's nearest neighbour, so a row appears in only one of them. Their detail rows include `Cluster ID` / `Cluster Size` (settlements linked by < 30 m pairs), `Nearest Settlement` and `Nearest Distance (m)`.
+
+SQ6 flags points that sit away from any mapped buildings, which usually means a misplaced coordinate or a point captured off-site. It uses the GRID3 Nigeria settlement extents v4.1 (Built-up Area, Small Settlement Area, Hamlet) rasterised to a 25 m grid, so distances are accurate to about one cell (the grid is slightly lenient: a cell counts if any part of an extent touches it). SQ6 detail rows add `Nearest Extent (m)` — distance to the nearest extent within 500 m, or `> 500` — and `Nearest Extent Type`. Rows without valid coordinates are left to SQ2/SQ2b.
 
 ---
 
@@ -226,12 +236,7 @@ Spatial and reference validation against the admin ward boundary dataset (9,406 
 | `Boundary Ward Code` (B2 only) | Ward code(s) of the polygon the coordinates fall in, or `No ward found at coordinates` |
 | `Boundary Ward Name` (B2 only) | Ward name(s) for the `Boundary Ward Code` |
 
-Reference files bundled in the repo:
-- `health_facility_ref.csv.gz` — 51,201 health facilities (`ward_code`, `primary_name`, `alternate_name`, `globalid`) across 8,912 wards, from `health_facilities.sqlite` — used by MLoS Rule 2
-- `ward_boundary_ref.csv` — 9,406 ward codes with state, LGA, and ward metadata (source: `ward_boundary_sept.sqlite`, Sept 2026)
-- `ward_boundary_geom.csv.gz` — 9,305 ward boundary polygons (WKB hex, EPSG:4326) per ward code, used for the B2 spatial join
-
-Both files are generated from the `ward_boundary_sept` table in `ward_boundary_sept.sqlite` (SpatiaLite). In the Sept 2026 release, ward codes for the northern states moved from numeric (e.g. `10101`) to alphanumeric (e.g. `BASALK01`), and some LGA codes changed along with their ward codes — so an LGA code does not always match the first 6 characters of its ward codes. Wards of every status (including `Invalid`) are included; duplicate ward codes are merged into one entry.
+Reference files used here are described under [Reference Data](#reference-data).
 
 ---
 
@@ -317,6 +322,89 @@ smtp_pass = "your-app-password"
 
 ---
 
+### 11. Shared State Results (Usage Database)
+
+Several people across different states use the app, so each QC run is logged to a SQLite database, `usage_log.db`, next to `app.py`. The app creates it on startup. It holds data, not code, so it is git-ignored and never committed.
+
+> ⚠️ **Streamlit Community Cloud does not keep files.** The database is erased whenever the app restarts, redeploys, or wakes from sleep, so the history only builds up between restarts. Download the Excel file regularly to keep a copy. To keep the history permanently, run the app on a server with a permanent disk.
+
+**Logging.** After QC finishes, each run is logged once. In the sidebar, uploaders enter **Your name** and can untick **Share results with team** for test runs. A file with several states is split into one result per state. Rows with no `state_name` get their state from `ward_code`, or from the file's state when the file has only one. State names follow the boundary reference spelling (e.g. `Fct`).
+
+| Table | Contents |
+|-------|----------|
+| `usage_log` | One row per run: time (WAT), uploader, file, state(s), LGAs, file format, rows, checks run / passing / failing, weighted score, QC layers, issue rows |
+| `state_runs` | One row per run and state: rows, weighted score, pass % per layer, failing checks, issue rows |
+| `rule_results` | One row per run, state, and check: failing rows, total rows, PASS/FAIL |
+| `fail_rows` | Failing rows from each state's **latest** run (layer, rule, LGA, ward, settlement, coordinates, and a `detail` column with the check's extra fields); replaced when the state runs again |
+
+Per-state scores use the same weights as the dashboard; for a single-state file they match the dashboard exactly.
+
+**Viewing.** The **🌍 State Results** tab (and the start page, before any upload) shows the latest run per state with a colour-coded score, a score-over-time chart once a state has more than one run, and for a selected state its rule results and failing rows, filterable by LGA and rule.
+
+**Downloading.**
+
+| Button | Contents |
+|--------|----------|
+| ⬇️ Download all state results (Excel) | Sheets **Latest by State**, **Run History** (newest first), **Rule Results** (pass/fail per check for every run), and **Usage Log** |
+| ⬇️ Download failing rows (CSV) | The selected state's failing rows from its latest run, with the LGA and rule filters applied |
+
+No setup or secrets are needed.
+
+---
+
+## Reference Data
+
+All reference data ships with the repo and is loaded once per app session.
+
+| File | Size | Contents | Used By | Source |
+|------|------|----------|---------|--------|
+| `ward_boundary_ref.csv` | 0.4 MB | 9,406 ward codes with state, LGA, and ward metadata | B1, B2, B3 | `ward_boundary_sept.sqlite` (Sept 2026) |
+| `ward_boundary_geom.csv.gz` | 7.7 MB | 9,305 ward polygons (WKB hex, EPSG:4326), one per ward code | B2 | `ward_boundary_sept.sqlite` |
+| `health_facility_ref.csv.gz` | 1.5 MB | 51,201 health facilities (`ward_code`, `primary_name`, `alternate_name`, `globalid`) across 8,912 wards | Rule 2 | `health_facilities.sqlite` |
+| `settlement_extent_mask.npz` | 18.9 MB | GRID3 Nigeria settlement extents v4.1 (2.55 M blocks) as a 25 m EPSG:3857 grid | SQ6 | `settlement_extent.gpkg` |
+
+**Ward boundaries (Sept 2026).** Ward codes for the northern states moved from numeric (e.g. `10101`) to alphanumeric (e.g. `BASALK01`), and some LGA codes changed along with their ward codes — so an LGA code does not always match the first 6 characters of its ward codes. Wards of every status (including `Invalid`) are included; duplicate ward codes are merged into one entry (the non-`Invalid` row's metadata is kept). 103 wards have no polygon in the source and cannot be checked by B2.
+
+**Settlement extent grid.** Cell values are 0 none, 1 Hamlet, 2 Small Settlement Area, 3 Built-up Area (where types overlap, the larger class wins). The grid is stored as zlib-compressed 256×256 tiles at 2 bits per cell, with empty tiles dropped, which shrinks the 2 GB GeoPackage to under 20 MB. Checked against the original polygons on a random sample, the grid agreed on 99.5% of points; the rest were points the grid passes but the polygons would not.
+
+### Rebuilding reference data
+
+Each file is regenerated by a script in `scripts/`. Run them from the repo root when a new source release arrives, then commit the updated files.
+
+```bash
+python scripts/build_ward_ref.py   /path/to/ward_boundary_sept.sqlite .
+python scripts/build_ward_geom.py  /path/to/ward_boundary_sept.sqlite ward_boundary_geom.csv.gz
+python scripts/build_hf_ref.py     /path/to/health_facilities.sqlite  health_facility_ref.csv.gz
+python scripts/build_extent_mask.py /path/to/settlement_extent.gpkg  settlement_extent_mask.npz
+```
+
+| Script | Extra packages (build-time only) | Notes |
+|--------|----------------------------------|-------|
+| `build_ward_ref.py` | — | Reads state codes from the existing `ward_boundary_ref.csv`, so that file must already be in the output folder |
+| `build_ward_geom.py` | `geopandas` | Drops empty geometries, repairs invalid ones, dissolves duplicate ward codes |
+| `build_hf_ref.py` | — | Drops facilities with no `ward_code` or `primary_name` |
+| `build_extent_mask.py` | `rasterio`, `pyogrio` | Takes a few minutes and ~3 GB of RAM |
+
+None of these extra packages are needed to run the app.
+
+---
+
+## Repository Layout
+
+```
+app.py                       Streamlit app (all QC layers)
+requirements.txt             App dependencies
+usage_log.db                 Usage database, created at runtime (git-ignored)
+ward_boundary_ref.csv        Reference data (see Reference Data)
+ward_boundary_geom.csv.gz
+health_facility_ref.csv.gz
+settlement_extent_mask.npz
+scripts/                     Reference data build scripts
+mlos_checkout_QC list.txt    Original QC rule list (older numbering; the rules above are current)
+```
+
+---
+
 ## How to Run Locally
 
 ```bash
@@ -330,7 +418,7 @@ streamlit run app.py
 2. Go to [share.streamlit.io](https://share.streamlit.io)
 3. Connect your GitHub repo
 4. Set **Main file path** to `app.py`
-5. Add SMTP credentials under **App secrets**
+5. Add the SMTP credentials under **App secrets** (see [Send QC Email](#10-send-qc-email))
 6. Deploy!
 
 ---
