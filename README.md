@@ -64,7 +64,7 @@ Use the **sidebar uploader** to upload your MLOS checkout file. The tool accepts
 
 Click **▶️ Run QC** in the sidebar to start. QC does not run until the button is clicked.
 
-Also enter **Your name** in the sidebar so the run is credited to you in State Results. Untick **Share results with team** for test runs you don't want logged.
+Also pick **Your name** from the sidebar dropdown so the run is credited to you in State Results. If your name is not listed, choose **➕ Other** and type it; it is added to the dropdown once the run is logged. Untick **Share results with team** for test runs you don't want logged.
 
 Once submitted, the app:
 1. Runs **Auto Correct** on the MLoS data (pre-step before QC)
@@ -328,7 +328,7 @@ Several people across different states use the app, so each QC run is logged to 
 
 > ⚠️ **Streamlit Community Cloud does not keep files.** The database is erased whenever the app restarts, redeploys, or wakes from sleep, so the history only builds up between restarts. Download the Excel file regularly to keep a copy. To keep the history permanently, run the app on a server with a permanent disk.
 
-**Logging.** After QC finishes, each run is logged once. In the sidebar, uploaders enter **Your name** and can untick **Share results with team** for test runs. A file with several states is split into one result per state. Rows with no `state_name` get their state from `ward_code`, or from the file's state when the file has only one. State names follow the boundary reference spelling (e.g. `Fct`).
+**Logging.** After QC finishes, each run is logged once. In the sidebar, uploaders pick **Your name** from the team dropdown (or type a new one under **➕ Other**) and can untick **Share results with team** for test runs. A file with several states is split into one result per state. Rows with no `state_name` get their state from `ward_code`, or from the file's state when the file has only one. State names follow the boundary reference spelling (e.g. `Fct`).
 
 | Table | Contents |
 |-------|----------|
@@ -349,6 +349,37 @@ Per-state scores use the same weights as the dashboard; for a single-state file 
 | ⬇️ Download failing rows (CSV) | The selected state's failing rows from its latest run, with the LGA and rule filters applied |
 
 No setup or secrets are needed.
+
+---
+
+### 12. Admin Panel
+
+The admin panel shows every QC run the team has logged, in one place. It is password-protected.
+
+**Turning it on.** Add an admin password to Streamlit secrets. Admin access stays off until this is set.
+
+```toml
+admin_password = "choose-a-long-password"
+```
+
+**Signing in.** Choose **🔐 Admin Panel** at the top of the sidebar, enter the password, and click **🔓 Login**. Switch back to **🏠 QC Tool** at any time without signing out, and click **🔒 Logout** when you are done. Sign-in lasts for the browser session only.
+
+**What it shows.**
+
+| Section | Contents |
+|---------|----------|
+| 📊 Usage Overview | Total QC runs (with how many came in the last 7 days), unique files, unique states, average score, and total rows checked, across all logged runs, plus who logged the latest run |
+| 🔍 Filter Logs | State, file format, team member, and date range, with a count of matching runs and a **↺ Reset filters** button. The filters apply to everything below them |
+| 📈 Trends | **📈 Over Time** shows runs per day and average score per day, against the 80% "good" line. **🗺️ By State**, **📁 By Format**, and **👤 By Team Member** each show run counts beside average scores, coloured green (≥ 80%), amber (60–80%), or red (< 60%) |
+| 📋 Full Usage Log | Every matching run, newest first: time (WAT), team member, file, states, format, score (as a bar), rating (🟢 Good / 🟡 Fair / 🔴 Poor), rows, checks, pass, fail, issue rows, QC layers |
+| ⬇️ Download (Excel) | Sheets **Usage Log** and **Rule Results**, with the filters applied |
+| 🔎 Run Details | One run's score, rows, failing checks and issue rows, its per-state layer pass rates, and its rule results (failing checks only by default) |
+
+**Limits.**
+- Runs where **Share results with team** was unticked are not logged, so the panel cannot show them.
+- Team member names come from the **Your name** dropdown. Names typed under **➕ Other** are not verified. Runs with no name show as *(name not given)*.
+- The panel reads the same `usage_log.db` as State Results, so it is erased with it on Streamlit Community Cloud restarts.
+- The password is shared, not per person. Anyone who has it sees everything.
 
 ---
 
@@ -419,6 +450,7 @@ streamlit run app.py
 3. Connect your GitHub repo
 4. Set **Main file path** to `app.py`
 5. Add the SMTP credentials under **App secrets** (see [Send QC Email](#10-send-qc-email))
+   and, to turn on the admin panel, `admin_password` (see [Admin Panel](#12-admin-panel))
 6. Deploy!
 
 ---
