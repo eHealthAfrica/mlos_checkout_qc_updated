@@ -14,6 +14,7 @@ import hmac
 import time
 import altair as alt
 from io import BytesIO
+from xml.sax.saxutils import escape as xml_escape
 from datetime import datetime, timedelta, timezone
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -152,6 +153,31 @@ EDITOR_RE   = re.compile(r'^[a-z]+\.[a-z]+$')
 # primarysettlement_name, alternate_name, reasons_for_inaccessibility
 YN_NA_COLS  = {"highrisk","slums","densely_populated","hard2reach","border",
                "nomadic","riverine","fulani"}
+INHABITED     = {"Inhabited", "Partially Inhabited"}
+NOT_INHABITED = {"Abandoned", "Migrated"}
+HH_SIZE_MIN, HH_SIZE_MAX = 2, 15          # plausible people per household (Rule 18)
+NAME_MATCH_CUTOFF = 0.85                  # similarity needed for LGA/ward names to match (B4, B5)
+NO_REASON   = {"", "NA", "N/A", "NONE", "NIL", "NULL"}   # "no reason given" spellings (Rule 21)
+PLACEHOLDER_NAMES = {"test", "testing", "sample", "unknown", "unk", "nil", "null", "none", "na", "n a",
+                     "no name", "noname", "not available", "settlement", "new settlement",
+                     "abc", "xyz"}         # junk settlement names (SQ7)
+
+def _txt(series):
+    """Column as stripped text, blanks as ''."""
+    return series.fillna("").astype(str).str.strip()
+
+def _num(series):
+    """Column as numbers; blanks and non-numbers become NaN."""
+    return pd.to_numeric(_txt(series).where(lambda s: s.ne("")), errors="coerce")
+
+def _name_key(s):
+    return re.sub(r"[^a-z0-9]+", " ", str(s).lower().replace("&", " and ")).strip()
+
+def names_match(a, b, cutoff=NAME_MATCH_CUTOFF):
+    """True if two place names match, ignoring case, punctuation, spacing and small spelling differences."""
+    a, b = _name_key(a), _name_key(b)
+    return (a == b or a.replace(" ", "") == b.replace(" ", "")
+            or difflib.SequenceMatcher(None, a, b).ratio() >= cutoff)
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────────
 def load_sqlite(uploaded_file):
@@ -673,6 +699,52 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, geom_df: pd.D
             "state_name in MLoS must match the state_name assigned to the ward_code in the boundary reference",
             mask_b3, ["ward_code", "state_name"])
 
+    # B4 / B5 / B6 — LGA, ward name and state code must agree with the reference for the ward_code.
+    # Only rows whose ward_code is in the reference are compared (unknown codes are B1's job).
+    if not ref_df.empty and {"ward_code", "lga_code", "lga_name", "ward_name", "state_code"} <= set(ref_df.columns):
+        ref_by_wc = ref_df.drop_duplicates("ward_code").set_index("ward_code")
+        wc_s  = _txt(mlos["ward_code"])
+        found = wc_s.isin(ref_by_wc.index)
+        ref   = lambda c: wc_s.map(ref_by_wc[c]).fillna("")
+
+        def name_mismatch(col, ref_col):
+            got, want = _txt(mlos[col]), ref(ref_col)
+            pairs = {p: names_match(*p) for p in set(zip(got, want))}
+            return found & got.ne("") & ~pd.Series([pairs[p] for p in zip(got, want)], index=mlos.index)
+
+        def add_with_ref(num, rule, desc, mask, extra, ref_cols):
+            add(num, rule, desc, mask, extra)
+            if mask.any():
+                for label, c in ref_cols:
+                    details[-1][label] = ref(c)[mask].values
+
+        if "lga_code" in mlos.columns or "lga_name" in mlos.columns:
+            bad = pd.Series(False, index=mlos.index)
+            if "lga_code" in mlos.columns:
+                got = _txt(mlos["lga_code"]).str.upper()
+                bad |= found & got.ne("") & got.ne(ref("lga_code").str.upper())
+            if "lga_name" in mlos.columns:
+                bad |= name_mismatch("lga_name", "lga_name")
+            add_with_ref("B4", "LGA — Boundary Reference Match",
+                         "lga_code and lga_name must match the LGA the ward_code belongs to in the boundary "
+                         "reference (names compared ignoring case, punctuation and small spelling differences)",
+                         bad, ["ward_code", "lga_code", "lga_name"],
+                         [("Ref LGA Code", "lga_code"), ("Ref LGA Name", "lga_name")])
+
+        if "ward_name" in mlos.columns:
+            add_with_ref("B5", "Ward Name — Boundary Reference Match",
+                         "ward_name must match the boundary reference name for the ward_code "
+                         "(case, punctuation and small spelling differences ignored)",
+                         name_mismatch("ward_name", "ward_name"), ["ward_code", "ward_name"],
+                         [("Ref Ward Name", "ward_name")])
+
+        if "state_code" in mlos.columns:
+            got = _txt(mlos["state_code"]).str.upper()
+            add_with_ref("B6", "State Code — Boundary Reference Match",
+                         "state_code must match the state_code of the ward_code in the boundary reference",
+                         found & got.ne("") & got.ne(ref("state_code").str.upper()),
+                         ["ward_code", "state_code"], [("Ref State Code", "state_code")])
+
     # B2 — spatial join: the ward_code of the boundary polygon each point falls in
     # must equal the ward_code on the settlement. Rows are skipped only when the
     # point falls in no ward AND the declared ward has no polygon to compare against.
@@ -761,14 +833,13 @@ def run_settlement_qc(mlos: pd.DataFrame, extents=None):
             lat.isna() | lon.isna(),
             ["latitude", "longitude"])
 
-    # SQ2b — latitude and longitude must not be zero (where non-null)
+    # SQ2b — latitude and longitude must not be "0" or blank
     if "latitude" in mlos.columns and "longitude" in mlos.columns:
         lat = pd.to_numeric(mlos["latitude"],  errors="coerce")
         lon = pd.to_numeric(mlos["longitude"], errors="coerce")
-        has_value = lat.notna() & lon.notna()
-        add("SQ2b", "Latitude/Longitude — Not Zero",
-            "latitude and longitude must not be zero",
-            has_value & ((lat == 0) | (lon == 0)),
+        add("SQ2b", "Latitude/Longitude — settlement with \"0\" or blanks",
+            "latitude and longitude must not be 0 or blank",
+            lat.isna() | lon.isna() | (lat == 0) | (lon == 0),
             ["latitude", "longitude"])
 
     # SQ3 — no two settlements may share identical coordinates (stacked)
@@ -870,6 +941,21 @@ def run_settlement_qc(mlos: pd.DataFrame, extents=None):
             details[-1]["Nearest Extent (m)"] = [f"> {EXTENT_SEARCH_M}" if np.isinf(d) else str(int(round(d, -1)))
                                                  for d in far_d]
             details[-1]["Nearest Extent Type"] = EXTENT_TYPES[far_t]
+
+    # SQ7 — settlement_name must be a real name, not a placeholder (blank names are left to Rule 1)
+    if "settlement_name" in mlos.columns:
+        sn  = _txt(mlos["settlement_name"])
+        key = sn.map(_name_key)
+        junk = sn.ne("") & (
+            ~sn.str.contains(r"[^\W\d_]", regex=True)            # no letters at all, e.g. "123", "--"
+            | key.str.replace(" ", "", regex=False).str.len().le(2)   # 1–2 characters
+            | key.isin(PLACEHOLDER_NAMES)                          # "test", "unknown", "nil", ...
+            | key.str.replace(" ", "", regex=False).str.fullmatch(r"(.)\1+")  # "xxx", "aaaa"
+        )
+        add("SQ7", "Settlement Name — Not a Placeholder",
+            "settlement_name must be a real name: not only numbers or symbols, not 1–2 characters, "
+            "and not a placeholder such as test, unknown, nil or xxx",
+            junk.fillna(False), ["settlement_name"])
 
     return checks, pd.concat(details) if details else pd.DataFrame()
 
@@ -1729,12 +1815,125 @@ def run_mlos_qc(mlos: pd.DataFrame, hf_by_ward: dict):
             "eha_guid must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)",
             ~vec_is_uuid(mlos["eha_guid"]), ["eha_guid"])
 
+    # R13 — day_of_activity must be a valid day code, or NA if not available (not blank)
+    if "day_of_activity" in mlos.columns:
+        day = _txt(mlos["day_of_activity"]).str.replace(r"\.0$", "", regex=True)
+        add("13", "Day of Activity Valid",
+            "day_of_activity must be 1, 1_2, 1_2_3, 1_2_3_4, 2, 2_3, 2_3_4, 3, 3_4, 4, or NA (not blank)",
+            ~day.isin(VALID_DAY), ["day_of_activity"])
+
+    # R14 — non-compliant households cannot outnumber households
+    if "noncompliant_household" in mlos.columns and "number_of_household" in mlos.columns:
+        mask = (_num(mlos["noncompliant_household"]) > _num(mlos["number_of_household"])).fillna(False)
+        add("14", "noncompliant_household ≤ number_of_household",
+            "noncompliant_household must not exceed number_of_household",
+            mask, ["noncompliant_household", "number_of_household"])
+
+    # R15 — counts must be whole numbers ≥ 0 (blank cells are left to Rule 1)
+    for col in ["set_population", "set_target", "number_of_household", "noncompliant_household"]:
+        if col in mlos.columns:
+            v = _num(mlos[col])
+            filled = _txt(mlos[col]).ne("")
+            add("15", f"{col} is a whole number ≥ 0",
+                f"{col} must be a whole number of 0 or more (no text, decimals or negatives)",
+                filled & ~(v.notna() & (v >= 0) & (v == v.round())), [col])
+
+    # R16 / R17 — population must agree with habitational_status
+    if "habitational_status" in mlos.columns and "set_population" in mlos.columns:
+        hab = _txt(mlos["habitational_status"])
+        pop = _num(mlos["set_population"])
+        add("16", "Inhabited Settlement Has Population",
+            "Inhabited and Partially Inhabited settlements must have set_population above 0",
+            hab.isin(INHABITED) & (pop <= 0).fillna(False),
+            ["habitational_status", "set_population"])
+        tgt = _num(mlos["set_target"]) if "set_target" in mlos.columns else pd.Series(np.nan, index=mlos.index)
+        add("17", "Abandoned/Migrated Has No Population",
+            "Abandoned and Migrated settlements must have set_population and set_target of 0 or blank",
+            hab.isin(NOT_INHABITED) & ((pop > 0) | (tgt > 0)).fillna(False),
+            ["habitational_status", "set_population", "set_target"])
+
+    # R18 — people per household must be plausible
+    if "set_population" in mlos.columns and "number_of_household" in mlos.columns:
+        pop = _num(mlos["set_population"])
+        hh  = _num(mlos["number_of_household"])
+        size = (pop / hh).where((pop > 0) & (hh > 0))
+        mask = ((size < HH_SIZE_MIN) | (size > HH_SIZE_MAX)).fillna(False)
+        add("18", "Household Size Plausible",
+            f"set_population ÷ number_of_household must be between {HH_SIZE_MIN} and {HH_SIZE_MAX} people per household",
+            mask, ["set_population", "number_of_household"])
+        if mask.any():
+            details[-1]["People per Household"] = size[mask].round(1).values
+
+    # R19 — dates must be real dates, not in the future, and last_updated not before timestamp
+    _dates = {}
+    _latest_ok = pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=1)   # 1-day allowance for time zones
+    for col in ["timestamp", "last_updated"]:
+        if col in mlos.columns:
+            raw = _txt(mlos[col])
+            dt  = pd.to_datetime(raw.where(raw.ne("")), errors="coerce", utc=True, format="mixed")
+            _dates[col] = dt
+            add("19", f"{col} is a Valid Date",
+                f"{col} must be a real date and not in the future",
+                raw.ne("") & (dt.isna() | (dt > _latest_ok)), [col])
+    if len(_dates) == 2:
+        add("19a", "last_updated Not Before timestamp",
+            "last_updated must not be earlier than timestamp",
+            (_dates["last_updated"] < _dates["timestamp"]).fillna(False), ["timestamp", "last_updated"])
+
+    # R20 — IDs must be unique within the file
+    for col in ["eha_guid", "mlos_id", "settlementarea_globalid"]:
+        if col in mlos.columns:
+            v = _txt(mlos[col]).str.lower()
+            filled = ~v.isin({"", "na", "null", "none"})
+            add("20", f"{col} is Unique",
+                f"{col} must not be repeated on more than one row",
+                filled & v.duplicated(keep=False), [col])
+
+    # R21 — Fully Accessible settlements should not give a reason for inaccessibility
+    if "accessibility_status" in mlos.columns and "reasons_for_inaccessibility" in mlos.columns:
+        add("21", "Fully Accessible Has No Inaccessibility Reason",
+            "Fully Accessible settlements must have reasons_for_inaccessibility blank or NA",
+            _txt(mlos["accessibility_status"]).eq("Fully Accessible")
+            & ~_txt(mlos["reasons_for_inaccessibility"]).str.upper().isin(NO_REASON),
+            ["accessibility_status", "reasons_for_inaccessibility"])
+
+    # R22 — team_code must be filled in (NA allowed when not available)
+    if "team_code" in mlos.columns:
+        add("22", "Team Code — Not Blank",
+            "team_code must be filled in (use NA if not available)",
+            _txt(mlos["team_code"]).eq(""), ["team_code"])
+
     # Keep original mlos_df indices so make_longitudinal_df can match failing rows correctly
     return checks, pd.concat(details) if details else pd.DataFrame()
 
 
 # ─── Excel Report Builder ─────────────────────────────────────────────────────────
-def build_excel_report(filename, mlos_checks, mlos_detail, mlos_df):
+# ─── QC Report (Excel + PDF), organised by QC category ────────────────────────────
+# Category order follows the report's breakdown order: MLoS, Settlement, Boundary, Schema.
+REPORT_LAYERS = [("mlos", "MLoS", "🏘️"), ("settlement", "Settlement", "📐"),
+                 ("boundary", "Boundary", "🗺️"), ("schema", "Schema", "🔎")]
+
+def build_report_categories(checks, details, weights):
+    """One summary dict per QC category: its checks, issue rows, pass rate and weighted contribution."""
+    cats = []
+    for key, name, icon in REPORT_LAYERS:
+        cl = checks.get(key) or []
+        n_fail = sum(1 for c in cl if "FAIL" in c["Status"])
+        rate = (len(cl) - n_fail) / len(cl) if cl else 1.0
+        det = details.get(key)
+        cats.append({
+            "key": key, "name": name, "icon": icon, "weight": weights[key], "checks": cl,
+            "detail": det if det is not None else pd.DataFrame(),
+            "n_checks": len(cl), "n_pass": len(cl) - n_fail, "n_fail": n_fail,
+            # Schema's detail lists missing columns, not data rows, so it has no issue-row count
+            "issue_rows": None if key == "schema" else (0 if det is None else len(det)),
+            "pass_rate": rate * 100, "contribution": rate * weights[key] * 100,
+        })
+    return cats
+
+def build_excel_report(filename, categories, mlos_df, weighted_score, generated_at):
+    """Excel QC report: cover with a per-category summary, then a Breakdown and an Issues sheet
+    for each category (MLoS, Settlement, Boundary, Schema), then the raw MLoS data."""
     out = BytesIO()
     wb  = openpyxl.Workbook()
 
@@ -1761,53 +1960,63 @@ def build_excel_report(filename, mlos_checks, mlos_detail, mlos_df):
             c = ws.cell(row=row, column=ci, value=col)
             c.fill=hdr_fill; c.font=hdr_font; c.alignment=ctr; c.border=bdr
 
-    total_fail = sum(1 for c in mlos_checks if "FAIL" in c["Status"])
+    def title_bar(ws, cell_range, text, colour=BLU, size=13, height=30):
+        ws.merge_cells(cell_range)
+        c = ws[cell_range.split(":")[0]]
+        c.value = text; c.font = Font(bold=True, size=size, color=WHT, name="Calibri")
+        c.fill = PatternFill("solid", fgColor=colour); c.alignment = ctr
+        ws.row_dimensions[c.row].height = height
+
+    total_fail  = sum(c["n_fail"] for c in categories)
+    total_issue = sum(c["issue_rows"] or 0 for c in categories)
 
     # ── Sheet 1: Cover ──
     ws = wb.active; ws.title = "QC Report Cover"
     ws.sheet_view.showGridLines = False
-    ws.column_dimensions["A"].width = 38
-    ws.column_dimensions["B"].width = 52
-    ws.merge_cells("A1:B1")
-    ws["A1"].value = "MLOS CHECKOUT — QUALITY CONTROL REPORT"
-    ws["A1"].font  = Font(bold=True, size=15, color=WHT, name="Calibri")
-    ws["A1"].fill  = PatternFill("solid", fgColor=BLU)
-    ws["A1"].alignment = ctr
-    ws.row_dimensions[1].height = 38
-
+    title_bar(ws, "A1:G1", "MLOS CHECKOUT — QUALITY CONTROL REPORT", size=15, height=38)
     meta = [
-        ("File",                   filename),
-        ("Generated At",           datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        ("MLoS Rows",              len(mlos_df)),
-        ("MLoS Checks Run",        len(mlos_checks)),
-        ("MLoS Checks Failing",    sum(1 for c in mlos_checks if "FAIL" in c["Status"])),
-        ("Total MLoS Issue Rows",  len(mlos_detail)),
+        ("File",                 filename),
+        ("Generated At (WAT)",   generated_at),
+        ("MLoS Rows",            len(mlos_df)),
+        ("Checks Run",           sum(c["n_checks"] for c in categories)),
+        ("Checks Failing",       total_fail),
+        ("Total Issue Rows",     total_issue),
+        ("Weighted QC Score",    f"{weighted_score:.1f}%"),
     ]
     for ri, (k, v) in enumerate(meta, 3):
+        ws.merge_cells(start_row=ri, start_column=2, end_row=ri, end_column=7)
         ka = ws.cell(row=ri, column=1, value=k); ka.font=bold_font; ka.border=bdr
         vb = ws.cell(row=ri, column=2, value=v); vb.font=body_font; vb.border=bdr; vb.alignment=lft
         if ri % 2 == 0: ka.fill=lgry_fill; vb.fill=lgry_fill
+    vrow = 3 + len(meta) + 1
+    title_bar(ws, f"A{vrow}:G{vrow}",
+              "✅  ALL CHECKS PASSED — File is CLEAN" if total_fail == 0
+              else f"❌  {total_fail} CHECK(S) FAILING — Review the Breakdown and Issues sheets",
+              colour=GRN if total_fail == 0 else RED, size=12)
 
-    ws.merge_cells("A14:B14")
-    vd = ws["A14"]
-    vd.value     = "✅  ALL CHECKS PASSED — File is CLEAN" if total_fail == 0 \
-                   else f"❌  {total_fail} CHECK(S) FAILING — Review issue sheets"
-    vd.fill      = PatternFill("solid", fgColor=GRN if total_fail==0 else RED)
-    vd.font      = Font(bold=True, size=12, color=WHT, name="Calibri")
-    vd.alignment = ctr
-    ws.row_dimensions[14].height = 30
+    srow = vrow + 2
+    title_bar(ws, f"A{srow}:G{srow}", "Summary by Category", size=12, height=26)
+    cols = ["Category", "Weight", "Checks Run", "Passing", "Failing", "Issue Rows", "Pass Rate"]
+    hdr_row(ws, srow + 1, cols)
+    for ri, cat in enumerate(categories, srow + 2):
+        vals = [f"{cat['name']} Checks", f"{cat['weight']*100:.0f}%", cat["n_checks"], cat["n_pass"],
+                cat["n_fail"], "—" if cat["issue_rows"] is None else cat["issue_rows"], f"{cat['pass_rate']:.1f}%"]
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=ri, column=ci, value=v)
+            c.font = bold_font if ci == 1 else body_font; c.border = bdr
+            c.alignment = lft if ci == 1 else ctr
+            c.fill = fail_fill if cat["n_fail"] else pass_fill
+    for i, w in enumerate([28, 22, 13, 11, 11, 13, 12], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
 
-    # helper to write a QC summary sheet
+    # helper to write a category's check breakdown sheet
     def write_summary(ws_s, title, checks_list):
         ws_s.sheet_view.showGridLines = False
-        ws_s.merge_cells("A1:G1")
-        ws_s["A1"].value     = title
-        ws_s["A1"].font      = Font(bold=True, size=13, color=WHT, name="Calibri")
-        ws_s["A1"].fill      = PatternFill("solid", fgColor=BLU)
-        ws_s["A1"].alignment = ctr
-        ws_s.row_dimensions[1].height = 30
+        title_bar(ws_s, "A1:G1", title)
         cols = ["Status","Rule#","QC Check","Description","Failing Rows","Total Rows","Fail %"]
         hdr_row(ws_s, 2, cols)
+        if not checks_list:
+            ws_s.cell(row=3, column=1, value="No checks were run for this category.").font = body_font
         for ri, row in enumerate(checks_list, 3):
             is_fail = "FAIL" in row["Status"]
             for ci, key in enumerate(cols, 1):
@@ -1817,8 +2026,9 @@ def build_excel_report(filename, mlos_checks, mlos_detail, mlos_df):
                 c.fill = fail_fill if is_fail else pass_fill
         for i, w in enumerate([14,8,32,65,14,12,9], 1):
             ws_s.column_dimensions[get_column_letter(i)].width = w
+        ws_s.freeze_panes = "A3"
 
-    # helper to write issue detail sheet
+    # helper to write a category's issue detail sheet
     def write_detail(ws_d, title, detail_df):
         ws_d.sheet_view.showGridLines = False
         if detail_df.empty:
@@ -1826,44 +2036,202 @@ def build_excel_report(filename, mlos_checks, mlos_detail, mlos_df):
             ws_d["A1"].font      = Font(bold=True, size=12, color=WHT, name="Calibri")
             ws_d["A1"].fill      = PatternFill("solid", fgColor=GRN)
             ws_d["A1"].alignment = ctr
+            ws_d.column_dimensions["A"].width = 60
             return
         nc = len(detail_df.columns)
-        ws_d.merge_cells(f"A1:{get_column_letter(nc)}1")
-        ws_d["A1"].value     = title
+        if nc > 1:
+            ws_d.merge_cells(f"A1:{get_column_letter(nc)}1")
+        ws_d["A1"].value     = f"{title} — Detailed Issue Rows"
         ws_d["A1"].font      = Font(bold=True, size=12, color=WHT, name="Calibri")
         ws_d["A1"].fill      = PatternFill("solid", fgColor=RED)
         ws_d["A1"].alignment = ctr
         ws_d.row_dimensions[1].height = 26
         hdr_row(ws_d, 2, list(detail_df.columns))
-        for ri, (_, row) in enumerate(detail_df.iterrows(), 3):
-            for ci, v in enumerate(row.values, 1):
-                c = ws_d.cell(row=ri, column=ci, value=v)
+        for ri, row in enumerate(detail_df.itertuples(index=False), 3):
+            for ci, v in enumerate(row, 1):
+                c = ws_d.cell(row=ri, column=ci, value=_cell(v))
                 c.font=body_font; c.border=bdr; c.alignment=lft
                 if ri % 2 == 0: c.fill = PatternFill("solid", fgColor="FFF5F5")
         for ci in range(1, nc+1):
             mx = max(len(str(detail_df.columns[ci-1])),
-                     max((len(str(v)) for v in detail_df.iloc[:, ci-1].astype(str)), default=0))
+                     max((len(str(v)) for v in detail_df.iloc[:200, ci-1].astype(str)), default=0))
             ws_d.column_dimensions[get_column_letter(ci)].width = min(max(mx+3, 12), 42)
+        ws_d.freeze_panes = "A3"
 
     # helper to write raw data sheet
     def write_raw(ws_r, df):
         ws_r.sheet_view.showGridLines = False
         if df.empty: return
         hdr_row(ws_r, 1, list(df.columns))
-        for ri, (_, row) in enumerate(df.iterrows(), 2):
-            for ci, v in enumerate(row.values, 1):
-                c = ws_r.cell(row=ri, column=ci, value=v)
+        for ri, row in enumerate(df.itertuples(index=False), 2):
+            for ci, v in enumerate(row, 1):
+                c = ws_r.cell(row=ri, column=ci, value=_cell(v))
                 c.font=body_font; c.border=bdr; c.alignment=lft
                 if ri % 2 == 0: c.fill = lgry_fill
         for ci in range(1, len(df.columns)+1):
             ws_r.column_dimensions[get_column_letter(ci)].width = 18
+        ws_r.freeze_panes = "A2"
 
-    write_summary(wb.create_sheet("MLoS QC Summary"),       "MLoS Table — QC Check Summary",          mlos_checks)
-    write_detail (wb.create_sheet("MLoS Issue Detail"),      "MLoS Table — Detailed Issue Rows",        mlos_detail)
-    write_raw    (wb.create_sheet("Raw MLoS Data"),          mlos_df)
+    for cat in categories:
+        write_summary(wb.create_sheet(f"{cat['name']} Breakdown"), f"{cat['name']} Check Breakdown", cat["checks"])
+        write_detail (wb.create_sheet(f"{cat['name']} Issues"),    f"{cat['name']} Checks", cat["detail"])
+    write_raw(wb.create_sheet("Raw MLoS Data"), mlos_df)
 
     wb.save(out)
     return out.getvalue()
+
+_PDF_SUBS = {"≤": "<=", "≥": ">=", "→": "->", "←": "<-", "×": "x", "✅": "", "❌": "", "⚠️": "", "⚠": ""}
+
+def _pdf_text(v):
+    """Text safe for the PDF's built-in Helvetica font (Windows-1252): symbols spelled out, emoji dropped."""
+    s = str(v)
+    for a, b in _PDF_SUBS.items():
+        s = s.replace(a, b)
+    return xml_escape(s.encode("cp1252", "ignore").decode("cp1252").strip())
+
+def build_pdf_report(filename, categories, n_rows, weighted_score, generated_at):
+    """PDF QC report: cover summary, a summary-by-category table, then one check breakdown per
+    category (MLoS, Settlement, Boundary, Schema). Row-level issues stay in the Excel report."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
+
+    BLUE, DARK, MUTED = colors.HexColor("#1d4ed8"), colors.HexColor("#1e293b"), colors.HexColor("#64748b")
+    GREEN, RED, AMBER = colors.HexColor("#15803d"), colors.HexColor("#be123c"), colors.HexColor("#b45309")
+    PASS_BG, FAIL_BG = colors.HexColor("#f0fdf4"), colors.HexColor("#fff1f2")
+    GRID, LIGHT = colors.HexColor("#d1d5db"), colors.HexColor("#f8fafc")
+
+    body  = ParagraphStyle("body", fontName="Helvetica", fontSize=8.5, leading=11, textColor=DARK)
+    bold  = ParagraphStyle("bold", parent=body, fontName="Helvetica-Bold")
+    small = ParagraphStyle("small", parent=body, fontSize=8, textColor=MUTED)
+    h1    = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=17, leading=21, textColor=colors.white)
+    h1sub = ParagraphStyle("h1sub", fontName="Helvetica", fontSize=9.5, leading=12,
+                           textColor=colors.HexColor("#bfdbfe"))
+    h2    = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=12.5, leading=16, textColor=BLUE,
+                           spaceBefore=6, spaceAfter=2)
+    hdr   = ParagraphStyle("hdr", parent=body, fontName="Helvetica-Bold", textColor=colors.white)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=14*mm, rightMargin=14*mm, topMargin=14*mm,
+                            bottomMargin=16*mm, title=f"MLoS QC Report — {filename}",
+                            author="eHealth Africa · MLOS QC Tool")
+    W = doc.width
+
+    def footer(canvas, d):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5); canvas.setFillColor(MUTED)
+        canvas.drawString(d.leftMargin, 9*mm,
+                          f"MLoS Checkout QC Report · {filename}".encode("cp1252", "ignore").decode("cp1252"))
+        canvas.drawRightString(d.leftMargin + d.width, 9*mm, f"Page {d.page}")
+        canvas.restoreState()
+
+    def table(rows, widths, row_bgs=None, header_bg=BLUE):
+        t = Table(rows, colWidths=widths, repeatRows=1)
+        style = [("BACKGROUND", (0, 0), (-1, 0), header_bg),
+                 ("GRID", (0, 0), (-1, -1), 0.4, GRID),
+                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                 ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                 ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5)]
+        for i, bg in enumerate(row_bgs or [], 1):
+            style.append(("BACKGROUND", (0, i), (-1, i), bg))
+        t.setStyle(TableStyle(style))
+        return t
+
+    P  = lambda v, s=body: Paragraph(_pdf_text(v), s)
+    Pc = lambda v, s=body: Paragraph(_pdf_text(v), ParagraphStyle("c", parent=s, alignment=1))
+    total_fail  = sum(c["n_fail"] for c in categories)
+    total_issue = sum(c["issue_rows"] or 0 for c in categories)
+    score_col   = GREEN if weighted_score >= 80 else AMBER if weighted_score >= 60 else RED
+    story = []
+
+    # Title band
+    band = Table([[Paragraph("MLOS CHECKOUT — QUALITY CONTROL REPORT", h1)],
+                  [Paragraph("Master List of Settlements · eHealth Africa", h1sub)]], colWidths=[W])
+    band.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), BLUE),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 12), ("TOPPADDING", (0, 0), (-1, 0), 12),
+                              ("BOTTOMPADDING", (0, -1), (-1, -1), 12)]))
+    story += [band, Spacer(1, 10)]
+
+    # File details + score
+    meta = [("File", filename), ("Generated At (WAT)", generated_at), ("MLoS Rows", f"{n_rows:,}"),
+            ("Checks Run", str(sum(c["n_checks"] for c in categories))),
+            ("Checks Failing", str(total_fail)), ("Total Issue Rows", f"{total_issue:,}")]
+    mt = Table([[P(k, bold), P(v)] for k, v in meta], colWidths=[W*0.22, W*0.48])
+    mt.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, GRID), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.white, LIGHT])]))
+    score_style = ParagraphStyle("score", fontName="Helvetica-Bold", fontSize=26, leading=30,
+                                 textColor=score_col, alignment=1)
+    st_ = Table([[Paragraph(f"{weighted_score:.1f}%", score_style)],
+                 [Pc("Weighted QC Score", small)]], colWidths=[W*0.26])
+    st_.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.6, GRID), ("BACKGROUND", (0, 0), (-1, -1), LIGHT),
+                             ("TOPPADDING", (0, 0), (-1, 0), 12), ("BOTTOMPADDING", (0, -1), (-1, -1), 10)]))
+    side = Table([[mt, st_]], colWidths=[W*0.72, W*0.28])
+    side.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                              ("RIGHTPADDING", (0, 0), (0, 0), 8)]))
+    story += [side, Spacer(1, 10)]
+
+    verdict_text = ("ALL CHECKS PASSED — File is CLEAN and ready for submission" if total_fail == 0 else
+                    f"{total_fail} CHECK(S) FAILING — {total_issue:,} issue row{'' if total_issue == 1 else 's'}. Fix before submission.")
+    vt = Table([[Paragraph(_pdf_text(verdict_text), ParagraphStyle(
+        "v", fontName="Helvetica-Bold", fontSize=10.5, leading=13, alignment=1,
+        textColor=GREEN if total_fail == 0 else RED))]], colWidths=[W])
+    vt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PASS_BG if total_fail == 0 else FAIL_BG),
+                            ("BOX", (0, 0), (-1, -1), 0.8, GREEN if total_fail == 0 else RED),
+                            ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+    story += [vt, Spacer(1, 12)]
+
+    # Summary by category
+    story.append(Paragraph("Summary by Category", h2))
+    rows = [[Paragraph(h, hdr) for h in ["Category", "Weight", "Checks", "Passing", "Failing",
+                                          "Issue Rows", "Pass Rate", "Contribution"]]]
+    for c in categories:
+        rows.append([P(f"{c['name']} Checks", bold), Pc(f"{c['weight']*100:.0f}%"), Pc(c["n_checks"]),
+                     Pc(c["n_pass"]), Pc(c["n_fail"]),
+                     Pc("—" if c["issue_rows"] is None else f"{c['issue_rows']:,}"),
+                     Pc(f"{c['pass_rate']:.1f}%"), Pc(f"{c['contribution']:.1f}%")])
+    rows.append([P("Total", bold), Pc("100%", bold), Pc(sum(c["n_checks"] for c in categories), bold),
+                 Pc(sum(c["n_pass"] for c in categories), bold), Pc(total_fail, bold),
+                 Pc(f"{total_issue:,}", bold), Pc(""), Pc(f"{weighted_score:.1f}%", bold)])
+    w = [0.22, 0.09, 0.09, 0.10, 0.09, 0.13, 0.12, 0.16]
+    story.append(table(rows, [W*x for x in w],
+                       [FAIL_BG if c["n_fail"] else PASS_BG for c in categories] + [LIGHT]))
+    story.append(Paragraph("Schema issues are missing columns, not data rows, so they have no issue-row count. "
+                           "Contribution = pass rate x weight; the contributions add up to the weighted score.",
+                           small))
+
+    # One breakdown per category
+    w = [0.09, 0.07, 0.22, 0.38, 0.08, 0.08, 0.08]
+    for c in categories:
+        head = [Paragraph(_pdf_text(f"{c['name']} Check Breakdown"), h2),
+                Paragraph(_pdf_text(f"{c['n_pass']} of {c['n_checks']} checks passing · weight "
+                                    f"{c['weight']*100:.0f}% · pass rate {c['pass_rate']:.1f}%"
+                                    + ("" if c["issue_rows"] is None else f" · {c['issue_rows']:,} issue row{'' if c['issue_rows'] == 1 else 's'}")),
+                          small), Spacer(1, 4)]
+        if not c["checks"]:
+            story.append(KeepTogether(head + [P("No checks were run for this category.")]))
+            continue
+        rows = [[Paragraph(h, hdr) for h in ["Status", "Rule#", "QC Check", "Description", "Failing",
+                                              "Total", "Fail %"]]]
+        bgs = []
+        for chk in c["checks"]:
+            fail = "FAIL" in chk["Status"]
+            stat = ParagraphStyle("s", parent=bold, alignment=1, textColor=RED if fail else GREEN)
+            rows.append([Paragraph("FAIL" if fail else "PASS", stat), Pc(chk["Rule#"], bold), P(chk["QC Check"]),
+                         P(chk["Description"]), Pc(f"{int(chk['Failing Rows']):,}"),
+                         Pc(f"{int(chk['Total Rows']):,}"), Pc(chk["Fail %"])])
+            bgs.append(FAIL_BG if fail else PASS_BG)
+        t = table(rows, [W*x for x in w], bgs)
+        story += [Spacer(1, 6), KeepTogether(head + [t]) if len(rows) <= 14 else head[0]]
+        if len(rows) > 14:
+            story += head[1:] + [t]
+    story += [Spacer(1, 10), Paragraph("Row-level issues for every rule are in the Excel report "
+                                        "(one Issues sheet per category).", small)]
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()
 
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────────
@@ -1943,6 +2311,17 @@ with st.sidebar:
 | 10 | Profile flags = Y/N/NA (highrisk, slums, densely_populated, hard2reach, border, nomadic, riverine, fulani) |
 | 11 | editor = firstname.surname (lowercase) |
 | 12 | eha_guid = valid UUID |
+| 13 | day_of_activity = 1, 1_2, 1_2_3, 1_2_3_4, 2, 2_3, 2_3_4, 3, 3_4, 4 or NA (not blank) |
+| 14 | noncompliant_household ≤ number_of_household |
+| 15 | set_population, set_target, number_of_household, noncompliant_household are whole numbers ≥ 0 |
+| 16 | Inhabited / Partially Inhabited → set_population > 0 |
+| 17 | Abandoned / Migrated → set_population and set_target are 0 or blank |
+| 18 | People per household (set_population ÷ number_of_household) between 2 and 15 |
+| 19 | timestamp and last_updated are real dates, not in the future |
+| 19a | last_updated is not earlier than timestamp |
+| 20 | eha_guid, mlos_id and settlementarea_globalid are not repeated |
+| 21 | Fully Accessible → reasons_for_inaccessibility is blank or NA |
+| 22 | team_code is filled in (NA if not available) |
         """)
     with st.expander("📐 Settlement QC Rules", expanded=False):
         st.markdown("""
@@ -1950,11 +2329,12 @@ with st.sidebar:
 |------|-------|
 | SQ1 | settlement_name must be unique within each ward_code (case/extra spaces ignored) |
 | SQ2 | latitude and longitude must not be null or missing |
-| SQ2b | latitude and longitude must not be zero |
+| SQ2b | latitude and longitude must not be 0 or blank |
 | SQ3 | No two settlements may share identical coordinates (stacked) |
 | SQ4 | Nearest other settlement must not be < 20 m away (proximity cluster) |
 | SQ5 | Nearest other settlement must not be 20–30 m away (proximity cluster) |
 | SQ6 | Settlement must be on, or within 50 m of, a GRID3 settlement extent |
+| SQ7 | settlement_name is a real name: not only numbers/symbols, not 1–2 characters, not a placeholder (test, unknown, nil, xxx…) |
         """)
     with st.expander("🗺️ Boundary Check Rules", expanded=False):
         st.markdown("""
@@ -1964,6 +2344,9 @@ with st.sidebar:
 | B1 | ward_code exists in admin ward boundary reference (9,406 wards) |
 | B2 | ward_code matches the ward boundary polygon the latitude/longitude falls in |
 | B3 | state_name in MLoS matches the state_name assigned to that ward_code in the boundary reference |
+| B4 | lga_code and lga_name match the LGA of that ward_code in the boundary reference |
+| B5 | ward_name matches the boundary reference name for that ward_code (small spelling differences allowed) |
+| B6 | state_code matches the state_code of that ward_code in the boundary reference |
         """)
     st.markdown("---")
     st.caption("eHealth Africa · MLOS QC Tool · v1.1")
@@ -2005,9 +2388,9 @@ Takeoffpoints are checked against the bundled health facility reference — no s
 
 **QC Layers:**
 - 🔎 **Schema Alignment** (S1) — verifies all required columns are present
-- 🏘️ **MLoS Rules** (1–12) — data integrity checks, including takeoffpoint vs. health facility
-- 📐 **Settlement QC** (SQ1–SQ6) — duplicate, coordinate, stacking, proximity, and settlement extent checks
-- 🗺️ **Boundary Checks** (B0–B3) — ward code, spatial ward match, and state name validation against admin boundary reference
+- 🏘️ **MLoS Rules** (1–22) — data integrity checks, including takeoffpoint vs. health facility, population, dates and unique IDs
+- 📐 **Settlement QC** (SQ1–SQ7) — duplicate, coordinate, stacking, proximity, settlement extent and name checks
+- 🗺️ **Boundary Checks** (B0–B6) — ward code, spatial ward match, and state, LGA and ward name validation against admin boundary reference
 
 **Outputs:**
 - Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score on the dashboard
@@ -2510,84 +2893,105 @@ with tab7:
     else:
         st.markdown(
             f'<div class="report-verdict-fail">❌ &nbsp; {n_fail} CHECK(S) FAILING — '
-            f'{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows} total issue rows. Fix before submission.</div>',
+            f'{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows:,} total issue rows. Fix before submission.</div>',
             unsafe_allow_html=True)
 
-    # Metadata card
-    gen_time      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mlos_n_fail   = sum(1 for c in mlos_checks       if "FAIL" in c["Status"])
-    mlos_n_pass   = len(mlos_checks)   - mlos_n_fail
-    sq_n_fail     = sum(1 for c in settlement_checks if "FAIL" in c["Status"])
-    sq_n_pass     = len(settlement_checks) - sq_n_fail
+    report_cats = build_report_categories(
+        {"schema": schema_checks, "mlos": mlos_checks, "settlement": settlement_checks, "boundary": boundary_checks},
+        {"schema": schema_detail, "mlos": mlos_detail, "settlement": settlement_detail, "boundary": boundary_detail},
+        LAYER_WEIGHTS)
 
+    # Build both reports once per QC run (not on every click), so the generated time stays fixed
+    _rep = st.session_state.get("qc_report")
+    if not _rep or _rep["key"] != qc_cache_key:
+        with st.spinner("Building Excel and PDF reports…"):
+            _gen = datetime.now(WAT).strftime("%Y-%m-%d %H:%M")
+            _rep = {"key": qc_cache_key, "generated": _gen,
+                    "xlsx": build_excel_report(filename, report_cats, mlos_df, weighted_score, _gen)}
+            try:
+                _rep["pdf"], _rep["pdf_error"] = build_pdf_report(
+                    filename, report_cats, len(mlos_df), weighted_score, _gen), None
+            except Exception as e:
+                _rep["pdf"], _rep["pdf_error"] = None, str(e)
+        st.session_state["qc_report"] = _rep
+
+    # Metadata card
     def rrow(lbl, val, cls="val"):
         return (f'<div class="report-row">'
                 f'<span class="lbl">{lbl}</span>'
                 f'<span class="{cls}">{val}</span>'
                 f'</div>')
+    score_cls = "val-pass" if weighted_score >= 80 else "val-fail"
+    st.markdown('<div class="report-card">' + "".join([
+        rrow("📁 File",                filename),
+        rrow("🕐 Generated At (WAT)",  _rep["generated"]),
+        rrow("📄 MLoS Rows",           f"{len(mlos_df):,}"),
+        rrow("🔍 Checks Run",          f"{len(all_checks)} ({n_pass} passing · {n_fail} failing)"),
+        rrow("🏆 Weighted QC Score",   f"{weighted_score:.1f}%", score_cls),
+    ]) + '</div>', unsafe_allow_html=True)
 
-    html = "".join([
-        rrow("📁 File",                    filename),
-        rrow("🕐 Generated At",            gen_time),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("MLoS Rows",                  f"{len(mlos_df):,}"),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("MLoS Checks Run",            str(len(mlos_checks))),
-        rrow("MLoS Checks ✅ Passing",     str(mlos_n_pass),  "val-pass"),
-        rrow("MLoS Checks ❌ Failing",     str(mlos_n_fail),  "val-fail" if mlos_n_fail else "val-pass"),
-        rrow("MLoS Issue Rows",            f"{mlos_fail_rows:,}",
-                                            "val-fail" if mlos_fail_rows else "val-pass"),
-        rrow("━" * 36,                     "", "val-div"),
-        rrow("Settlement Checks Run",      str(len(settlement_checks))),
-        rrow("Settlement Checks ✅ Passing", str(sq_n_pass),  "val-pass"),
-        rrow("Settlement Checks ❌ Failing", str(sq_n_fail),  "val-fail" if sq_n_fail else "val-pass"),
-        rrow("Settlement Issue Rows",      f"{settlement_fail_rows:,}",
-                                            "val-fail" if settlement_fail_rows else "val-pass"),
-    ])
-    st.markdown(f'<div class="report-card">{html}</div>', unsafe_allow_html=True)
+    # Summary by category
+    st.markdown("**📊 Summary by Category**")
+    st.dataframe(pd.DataFrame([{
+        "Category": f"{c['icon']} {c['name']} Checks", "Weight": f"{c['weight']*100:.0f}%",
+        "Checks Run": c["n_checks"], "Passing": c["n_pass"], "Failing": c["n_fail"],
+        "Issue Rows": "—" if c["issue_rows"] is None else f"{c['issue_rows']:,}",
+        "Pass Rate": c["pass_rate"]} for c in report_cats]),
+        hide_index=True, use_container_width=True, column_config={
+            "Pass Rate": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%")})
+    st.caption("Schema issues are missing columns, not data rows, so they have no issue-row count.")
 
-    # Two-column check breakdown
-    col_a, col_b = st.columns(2)
+    # One check breakdown per category
     def hl(row):
-        return (["color:#be123c; font-weight:700"] + [""]*4 if "FAIL" in str(row.get("Status",""))
-                else ["color:#15803d; font-weight:700"] + [""]*4)
-    with col_a:
-        st.markdown("**🏘️ MLoS Check Breakdown**")
-        tbl_m = pd.DataFrame([{"Status": c["Status"], "Rule#": c["Rule#"],
-                                "QC Check": c["QC Check"], "Failing": c["Failing Rows"],
-                                "Fail %": c["Fail %"]} for c in mlos_checks])
-        st.dataframe(tbl_m.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
-
-    with col_b:
-        st.markdown("**📐 Settlement Check Breakdown**")
-        tbl_sq = pd.DataFrame([{"Status": c["Status"], "Rule#": c["Rule#"],
-                                 "QC Check": c["QC Check"], "Failing": c["Failing Rows"],
-                                 "Fail %": c["Fail %"]} for c in settlement_checks])
-        st.dataframe(tbl_sq.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
+        colour = "color:#be123c; font-weight:700" if "FAIL" in str(row.get("Status", "")) \
+                 else "color:#15803d; font-weight:700"
+        return [colour] + [""] * (len(row) - 1)
+    for c in report_cats:
+        with st.container(border=True):
+            st.markdown(f"**{c['icon']} {c['name']} Check Breakdown**")
+            st.caption(f"{c['n_pass']} of {c['n_checks']} checks passing · weight {c['weight']*100:.0f}% · "
+                       f"pass rate {c['pass_rate']:.1f}%"
+                       + ("" if c["issue_rows"] is None else f" · {c['issue_rows']:,} issue row{'' if c['issue_rows'] == 1 else 's'}"))
+            if not c["checks"]:
+                st.info("No checks were run for this category.")
+                continue
+            tbl = pd.DataFrame([{"Status": k["Status"], "Rule#": k["Rule#"], "QC Check": k["QC Check"],
+                                 "Description": k["Description"], "Failing": k["Failing Rows"],
+                                 "Total": k["Total Rows"], "Fail %": k["Fail %"]} for k in c["checks"]])
+            st.dataframe(tbl.style.apply(hl, axis=1), use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
     # Download
     st.markdown("**📥 Download Full QC Report**")
-    st.caption("4-sheet Excel report: Cover Page · MLoS QC Summary · MLoS Issue Detail · Raw MLoS Data")
-
-    with st.spinner("Building Excel report…"):
-        report_bytes = build_excel_report(filename, mlos_checks, mlos_detail, mlos_df)
-
-    report_file = filename.replace(".sqlite","").replace(".db","") + "_QC_Report.xlsx"
-    st.download_button(
-        label   = "⬇️  Download Full QC Report (Excel)",
-        data    = report_bytes,
-        file_name = report_file,
-        mime    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type    = "primary",
+    st.caption("Both reports are organised by category: MLoS, Settlement, Boundary and Schema. "
+               "The **PDF** has the summary and each category's check breakdown. The **Excel** file adds "
+               "an Issues sheet per category with the failing rows, plus the raw MLoS data.")
+    report_base = re.sub(r"\.(sqlite3?|db|csv|xlsx|xls)$", "", filename, flags=re.I) + "_QC_Report"
+    d1, d2 = st.columns(2)
+    d1.download_button(
+        label     = "⬇️  Download QC Report (Excel)",
+        data      = _rep["xlsx"],
+        file_name = report_base + ".xlsx",
+        mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type      = "primary", use_container_width=True, key="report_xlsx",
     )
+    if _rep["pdf"]:
+        d2.download_button(
+            label     = "⬇️  Download QC Report (PDF)",
+            data      = _rep["pdf"],
+            file_name = report_base + ".pdf",
+            mime      = "application/pdf",
+            type      = "primary", use_container_width=True, key="report_pdf",
+        )
+    else:
+        d2.error(f"❌ The PDF report could not be built: {_rep['pdf_error']}")
 
     if n_fail == 0:
         st.success("✅ File is CLEAN — all checks passed.")
     else:
         st.warning(f"⚠️ {n_fail} check(s) failing with "
-                   f"{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows} issue rows. "
+                   f"{mlos_fail_rows + settlement_fail_rows + boundary_fail_rows:,} issue rows. "
                    f"Fix and re-upload before submission.")
 
     st.markdown("---")
