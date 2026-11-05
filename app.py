@@ -9,6 +9,10 @@ import re
 import difflib
 import zlib
 import uuid
+import hashlib
+import hmac
+import time
+import altair as alt
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 import openpyxl
@@ -86,6 +90,51 @@ st.markdown("""
   .report-row .val-pass { color: #15803d; font-weight: 700; }
   .report-row .val-fail { color: #dc2626; font-weight: 700; }
   .report-row .val-div { color: #e2e8f0; }
+
+  /* Metric cards */
+  [data-testid="stMetric"] {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px;
+    min-height: 118px;
+  }
+  [data-testid="stMetricLabel"] p {
+    color: #64748b !important; font-size: 0.78rem !important; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  [data-testid="stMetricValue"] { color: #1e293b; font-size: 1.65rem; font-weight: 700; }
+
+  /* Page switch at the top of the sidebar, drawn as a segmented control */
+  section[data-testid="stSidebar"] div[role="radiogroup"] {
+    display: flex; flex-wrap: nowrap; gap: 4px; padding: 4px; width: 100%; box-sizing: border-box;
+    background: #e2e8f0; border-radius: 10px;
+  }
+  section[data-testid="stSidebar"] div:has(> [data-testid="stRadio"]),
+  section[data-testid="stSidebar"] [data-testid="stRadio"],
+  section[data-testid="stSidebar"] [data-testid="stRadio"] > div { width: 100% !important; }
+  section[data-testid="stSidebar"] div[role="radiogroup"] label p { white-space: nowrap; }
+  section[data-testid="stSidebar"] div[role="radiogroup"] > div,
+  section[data-testid="stSidebar"] div[role="radiogroup"] > label { flex: 1; }
+  section[data-testid="stSidebar"] div[role="radiogroup"] label {
+    width: 100%; justify-content: center; margin: 0 !important; padding: 7px 6px;
+    border-radius: 8px; cursor: pointer;
+  }
+  section[data-testid="stSidebar"] div[role="radiogroup"] label > div { justify-content: center; }
+  /* hide the radio circle, keep the text */
+  section[data-testid="stSidebar"] div[role="radiogroup"] label
+    div:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])) { display: none; }
+  section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+    background: #ffffff; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  }
+  section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p {
+    color: #1d4ed8 !important; font-weight: 600;
+  }
+
+  /* Admin header variant and signed-in badge */
+  .app-header.admin { background: #0f172a; }
+  .app-header.admin p { color: #cbd5e1; }
+  .admin-badge {
+    display: inline-block; background: #f0fdf4; color: #15803d; border: 1px solid #86efac;
+    border-radius: 999px; padding: 4px 12px; font-size: 0.8rem; font-weight: 600;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -147,8 +196,22 @@ def load_xlsx(uploaded_file):
     # "NA" (used in flag columns) to NaN. Only truly empty cells remain as NaN.
     return xl.parse(mlos_sheet, dtype=str, keep_default_na=False)
 
+def upload_key(uploaded_file):
+    """Identify an upload by name, size and a hash of its contents, so a corrected file
+    re-uploaded under the same name and size is not mistaken for the previous one.
+    The hash is memoised per upload (file_id) so it is computed once, not on every rerun."""
+    fid  = getattr(uploaded_file, "file_id", None)
+    memo = st.session_state.get("_upload_key_memo")
+    if fid is not None and memo and memo[0] == fid:
+        return memo[1]
+    key = (uploaded_file.name, getattr(uploaded_file, "size", None),
+           hashlib.sha256(uploaded_file.getvalue()).hexdigest())
+    if fid is not None:
+        st.session_state["_upload_key_memo"] = (fid, key)
+    return key
+
 def get_uploaded_data(uploaded_file, progress=None):
-    cache_key = (uploaded_file.name, getattr(uploaded_file, "size", None))
+    cache_key = upload_key(uploaded_file)
     if st.session_state.get("uploaded_cache_key") == cache_key:
         if progress is not None:
             progress.progress(100)
@@ -414,17 +477,31 @@ class SettlementExtentMask:
     def nearest(self, lat, lon, radius_m):
         """Distance (m, cell precision) to and type of the nearest extent cell within
         radius_m of each point; inf / 0 where none."""
-        rows, cols = self.cells(lat, lon)
+        lat = np.asarray(lat, dtype=float)
+        lon = np.asarray(lon, dtype=float)
+        best_d = np.full(len(lat), np.inf)
+        best_t = np.zeros(len(lat), dtype=np.uint8)
+        # Only search from points on or near the grid. A typo latitude (e.g. 90 or 100)
+        # would otherwise size the search window from cos(lat) ≈ 0 or < 0, either
+        # exhausting memory or leaving the window empty so every point fails. Points
+        # outside the grid cannot be on an extent, so they keep inf / 0.
+        ok = np.isfinite(lat) & np.isfinite(lon) & (np.abs(lat) <= 85) & (np.abs(lon) <= 180)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rows, cols = self.cells(np.where(ok, lat, 0.0), np.where(ok, lon, 0.0))
+        T = self.tile
+        margin = int(np.ceil(radius_m / (self.res * np.cos(np.radians(85)))))
+        ok &= ((rows >= -margin) & (cols >= -margin) &
+               (rows < self.ty * T + margin) & (cols < self.tx * T + margin))
+        todo = np.flatnonzero(ok)
+        if not len(todo):
+            return best_d, best_t
         scale = self.res * np.cos(np.radians(lat))          # ground metres per cell
-        n = int(np.ceil(radius_m / scale.min())) if len(lat) else 0
+        n = int(np.ceil(radius_m / scale[todo].min()))
         dy, dx = np.mgrid[-n:n + 1, -n:n + 1]
         dy, dx = dy.ravel(), dx.ravel()
         cell_d = np.hypot(dy, dx)
         order = np.argsort(cell_d, kind="stable")
         dy, dx, cell_d = dy[order], dx[order], cell_d[order]
-        best_d = np.full(len(lat), np.inf)
-        best_t = np.zeros(len(lat), dtype=np.uint8)
-        todo = np.arange(len(lat))
         for oy, ox, cd in zip(dy, dx, cell_d):
             if not len(todo):
                 break
@@ -980,8 +1057,15 @@ def render_state_results():
 
     if runs.groupby("state").size().max() > 1:
         st.markdown("**Score over time**")
-        trend = runs.pivot_table(index="timestamp", columns="state", values="weighted_score", aggfunc="last")
-        st.line_chart(trend)
+        trend = runs.assign(when=pd.to_datetime(runs["timestamp"], errors="coerce")).dropna(subset=["when"])
+        st.altair_chart(alt.Chart(trend).mark_line(point=True).encode(
+            x=alt.X("when:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=0)),
+            y=alt.Y("weighted_score:Q", title="Score %", scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color("state:N", title="State"),
+            tooltip=[alt.Tooltip("state:N", title="State"), alt.Tooltip("timestamp:N", title="Run (WAT)"),
+                     alt.Tooltip("weighted_score:Q", title="Score %", format=".1f"),
+                     alt.Tooltip("filename:N", title="File")],
+        ).properties(height=300), use_container_width=True)
 
     rules_all = load_results_table("rule_results")
     st.download_button(
@@ -1021,7 +1105,303 @@ def render_state_results():
     st.download_button("⬇️ Download failing rows (CSV)", view.to_csv(index=False).encode(),
                        file_name=f"{state}_failing_rows.csv", mime="text/csv", key="sr_dl")
 
+# ─── Admin Panel ──────────────────────────────────────────────────────────────────
+# Password-protected platform usage tracking: every QC run logged to the usage
+# database, for the data team lead. Opened from the "🔐 Admin Panel" choice at the
+# top of the sidebar. The password is read from Streamlit secrets (`admin_password`);
+# when it is not set, admin access is switched off.
+NAV_QC, NAV_ADMIN = "🏠 QC Tool", "🔐 Admin Panel"
+BRAND_BLUE = "#1d4ed8"
+SCORE_SCALE = alt.Scale(type="threshold", domain=[60, 80], range=["#e11d48", "#f59e0b", "#16a34a"])
+ADMIN_FILTER_KEYS = ["adm_state", "adm_format", "adm_person", "adm_dates"]
+
+def _admin_password():
+    try:
+        return str(st.secrets.get("admin_password", "") or "")
+    except Exception:
+        return ""
+
+def _split_states(value):
+    return [s.strip() for s in str(value).split(",") if s.strip()]
+
+def _score_rating(v):
+    if pd.isna(v): return "—"
+    return "🟢 Good" if v >= 80 else "🟡 Fair" if v >= 60 else "🔴 Poor"
+
+def _reset_admin_filters():
+    for k in ADMIN_FILTER_KEYS:
+        st.session_state.pop(k, None)
+
+def _runs_per_day_chart(view):
+    """Bars of QC runs per day on a real date axis, so quiet days show as gaps."""
+    d = view.dropna(subset=["when"])[["when", "run_id"]]
+    return alt.Chart(d).mark_bar(color=BRAND_BLUE, cornerRadiusTopLeft=3, cornerRadiusTopRight=3,
+                                 width=alt.RelativeBandSize(0.8)).encode(
+        x=alt.X("yearmonthdate(when):T", title=None, axis=alt.Axis(format="%d %b", labelAngle=0)),
+        y=alt.Y("count():Q", title="QC runs", axis=alt.Axis(tickMinStep=1)),
+        tooltip=[alt.Tooltip("yearmonthdate(when):T", title="Day", format="%d %b %Y"),
+                 alt.Tooltip("count():Q", title="QC runs")],
+    ).properties(height=260)
+
+def _score_per_day_chart(view):
+    """Average weighted score per day, on a fixed 0–100 axis with the 80% 'good' line."""
+    d = view.dropna(subset=["when", "weighted_score"])[["when", "weighted_score"]]
+    line = alt.Chart(d).mark_line(color=BRAND_BLUE, point=alt.OverlayMarkDef(color=BRAND_BLUE, size=50)).encode(
+        x=alt.X("yearmonthdate(when):T", title=None, axis=alt.Axis(format="%d %b", labelAngle=0)),
+        y=alt.Y("mean(weighted_score):Q", title="Avg score %", scale=alt.Scale(domain=[0, 100])),
+        tooltip=[alt.Tooltip("yearmonthdate(when):T", title="Day", format="%d %b %Y"),
+                 alt.Tooltip("mean(weighted_score):Q", title="Avg score %", format=".1f"),
+                 alt.Tooltip("count():Q", title="QC runs")],
+    )
+    good = alt.Chart(pd.DataFrame({"y": [80]})).mark_rule(color="#16a34a", strokeDash=[4, 4]).encode(y="y:Q")
+    return (good + line).properties(height=260)
+
+def _breakdown_charts(df, key, label):
+    """Side-by-side bars for one grouping: QC runs (left) and average score (right), largest first."""
+    g = (df.groupby(key).agg(runs=("run_id", "nunique"), score=("weighted_score", "mean"))
+           .reset_index().rename(columns={key: label, "runs": "QC runs", "score": "Avg score %"}))
+    height = max(140, 34 * len(g))
+    y = alt.Y(f"{label}:N", sort=alt.EncodingSortField("QC runs", order="descending"), title=None)
+    base = alt.Chart(g).encode(y=y, tooltip=[label, "QC runs", alt.Tooltip("Avg score %:Q", format=".1f")])
+    runs = (base.mark_bar(color=BRAND_BLUE, cornerRadiusEnd=3)
+                .encode(x=alt.X("QC runs:Q", axis=alt.Axis(tickMinStep=1)))
+            + base.mark_text(align="left", dx=4, color="#334155").encode(x="QC runs:Q", text="QC runs:Q"))
+    score = (base.mark_bar(cornerRadiusEnd=3)
+                 .encode(x=alt.X("Avg score %:Q", scale=alt.Scale(domain=[0, 100])),
+                         color=alt.Color("Avg score %:Q", scale=SCORE_SCALE, legend=None))
+             + base.mark_text(align="left", dx=4, color="#334155")
+                   .encode(x="Avg score %:Q", text=alt.Text("Avg score %:Q", format=".1f")))
+    c1, c2 = st.columns(2)
+    c1.markdown(f"**QC runs per {label.lower()}**")
+    c1.altair_chart(runs.properties(height=height), use_container_width=True)
+    c2.markdown(f"**Average score per {label.lower()}**")
+    c2.altair_chart(score.properties(height=height), use_container_width=True)
+
+def render_admin_page():
+    """Admin page: sign-in card, then the usage tracking panel with a Logout button."""
+    expected = _admin_password()
+    if not expected:
+        st.info("Admin access is off. Set `admin_password` in Streamlit secrets to turn it on.")
+        return
+    if not st.session_state.get("is_admin"):
+        _, col, _ = st.columns([1, 1.3, 1])
+        with col, st.container(border=True):
+            st.markdown("#### 🔐 Admin sign-in")
+            st.caption("Enter the admin password to see every QC run the team has shared.")
+            with st.form("admin_login_form", clear_on_submit=True, border=False):
+                pw = st.text_input("Admin password", type="password", key="admin_pw")
+                submitted = st.form_submit_button("🔓 Login", type="primary", use_container_width=True)
+            if submitted:
+                if hmac.compare_digest(pw.encode(), expected.encode()):
+                    st.session_state["is_admin"] = True
+                    st.rerun()
+                else:
+                    time.sleep(1)   # slows down password guessing
+                    st.error("Incorrect password.")
+        return
+    top_l, top_r = st.columns([5, 1], vertical_alignment="center")
+    top_l.markdown('<span class="admin-badge">● Signed in as admin</span>', unsafe_allow_html=True)
+    if top_r.button("🔒 Logout", key="admin_logout", use_container_width=True):
+        st.session_state["is_admin"] = False
+        st.rerun()
+    render_admin_panel()
+
+def render_admin_panel():
+    """Usage overview, filters, charts, the full usage log, run details and Excel export."""
+    try:
+        usage = load_results_table("usage_log")
+        runs  = load_results_table("state_runs")
+        rules = load_results_table("rule_results")
+    except Exception as e:
+        st.error(f"❌ Could not read the usage database: {e}")
+        return
+    if usage.empty:
+        st.info("No QC runs have been logged yet. Runs appear here once someone runs QC "
+                "with **Share results with team** ticked.")
+        return
+
+    for c in ["mlos_rows", "total_checks", "checks_passing", "checks_failing", "weighted_score", "issue_rows"]:
+        usage[c] = pd.to_numeric(usage[c], errors="coerce")
+    runs["weighted_score"] = pd.to_numeric(runs["weighted_score"], errors="coerce")
+    usage["when"] = pd.to_datetime(usage["timestamp"], errors="coerce")
+    usage["uploaded_by"] = usage["uploaded_by"].replace("", "(name not given)")
+    usage = usage.sort_values("when", ascending=False, na_position="last")
+    all_states = sorted({s for v in usage["state_name"] for s in _split_states(v)})
+
+    # ── Usage Overview (all logged runs) ──
+    st.markdown('<div class="sec-title">📊 Usage Overview</div>', unsafe_allow_html=True)
+    week_ago = pd.Timestamp(datetime.now(WAT).replace(tzinfo=None)) - pd.Timedelta(days=7)
+    this_week = int((usage["when"] >= week_ago).sum())
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Total QC Runs", f"{len(usage):,}", delta=f"+{this_week} in last 7 days" if this_week else None)
+    m2.metric("Unique Files", f"{usage['filename'].nunique():,}")
+    m3.metric("Unique States", f"{len(all_states):,}")
+    m4.metric("Avg Score", f"{usage['weighted_score'].mean():.1f}%" if usage["weighted_score"].notna().any() else "—")
+    m5.metric("Total Rows Checked", f"{int(usage['mlos_rows'].fillna(0).sum()):,}")
+    last = usage.iloc[0]
+    st.caption(f"Last run logged {last['timestamp']} (WAT) by {last['uploaded_by']} · {last['filename']}")
+
+    # ── Filter Logs ──
+    st.markdown('<div class="sec-title">🔍 Filter Logs</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        f1, f2, f3, f4 = st.columns(4)
+        state  = f1.selectbox("State", ["All"] + all_states, key="adm_state")
+        fmt    = f2.selectbox("File Format", ["All"] + sorted(usage["file_format"].unique()), key="adm_format")
+        person = f3.selectbox("Team Member", ["All"] + sorted(usage["uploaded_by"].unique()), key="adm_person")
+        dates  = f4.date_input("Date Range", value=(), key="adm_dates", format="YYYY/MM/DD")
+
+        view = usage
+        if state != "All":
+            view = view[view["state_name"].map(lambda v: state in _split_states(v))]
+        if fmt != "All":
+            view = view[view["file_format"] == fmt]
+        if person != "All":
+            view = view[view["uploaded_by"] == person]
+        if isinstance(dates, (list, tuple)) and len(dates) == 2:
+            lo, hi = pd.Timestamp(dates[0]), pd.Timestamp(dates[1]) + pd.Timedelta(days=1)
+            view = view[(view["when"] >= lo) & (view["when"] < hi)]
+
+        s1, s2 = st.columns([5, 1], vertical_alignment="center")
+        s1.markdown(f"Showing **{len(view):,}** of {len(usage):,} runs")
+        s2.button("↺ Reset filters", key="adm_reset", on_click=_reset_admin_filters, use_container_width=True)
+    if view.empty:
+        st.info("No runs match these filters.")
+        return
+
+    # ── Charts ──
+    st.markdown('<div class="sec-title">📈 Trends</div>', unsafe_allow_html=True)
+    t1, t2, t3, t4 = st.tabs(["📈 Over Time", "🗺️ By State", "📁 By Format", "👤 By Team Member"])
+    with t1:
+        c1, c2 = st.columns(2)
+        c1.markdown("**QC runs per day**")
+        c1.altair_chart(_runs_per_day_chart(view), use_container_width=True)
+        c2.markdown("**Average score per day**")
+        c2.altair_chart(_score_per_day_chart(view), use_container_width=True)
+        st.caption("Dashed green line = 80%, the 'good' score threshold.")
+    with t2:
+        per_state = runs[runs["run_id"].isin(view["run_id"])][["run_id", "state", "weighted_score"]]
+        if per_state.empty:   # older runs without per-state rows: fall back to the run's state list
+            per_state = view.assign(state=view["state_name"].map(lambda v: _split_states(v) or ["Unknown"]))
+            per_state = per_state.explode("state")[["run_id", "state", "weighted_score"]]
+        _breakdown_charts(per_state, "state", "State")
+        st.caption("A run covering several states counts once for each state, with that state's own score.")
+    with t3:
+        _breakdown_charts(view, "file_format", "Format")
+    with t4:
+        _breakdown_charts(view, "uploaded_by", "Team Member")
+        st.caption("Team members are the names picked (or typed under ➕ Other) in the sidebar's **Your name** box.")
+
+    # ── Full Usage Log ──
+    log_tbl = view[["timestamp", "uploaded_by", "filename", "state_name", "file_format", "mlos_rows",
+                    "total_checks", "checks_passing", "checks_failing", "weighted_score", "issue_rows",
+                    "qc_layers"]].rename(columns={
+        "timestamp": "Timestamp", "uploaded_by": "Team Member", "filename": "File", "state_name": "State(s)",
+        "file_format": "Format", "mlos_rows": "MLoS Rows", "total_checks": "Checks", "checks_passing": "Pass",
+        "checks_failing": "Fail", "weighted_score": "Score %", "issue_rows": "Issue Rows",
+        "qc_layers": "QC Layers"})
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        for name, df in [("Usage Log", log_tbl),
+                         ("Rule Results", rules[rules["run_id"].isin(view["run_id"])].drop(columns=["run_id"]))]:
+            df.to_excel(xw, sheet_name=name, index=False)
+            ws = xw.sheets[name]
+            for i, col in enumerate(df.columns, 1):
+                ws.column_dimensions[get_column_letter(i)].width = min(max(len(str(col)) + 2, 12), 40)
+            ws.freeze_panes = "A2"
+
+    h1, h2 = st.columns([4, 1], vertical_alignment="bottom")
+    h1.markdown('<div class="sec-title">📋 Full Usage Log</div>', unsafe_allow_html=True)
+    h2.download_button("⬇️ Download (Excel)", buf.getvalue(),
+                       file_name=f"MLoS_Usage_Log_{datetime.now(WAT):%Y%m%d}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       key="adm_dl", use_container_width=True)
+    shown = log_tbl.assign(Timestamp=view["when"], Rating=view["weighted_score"].map(_score_rating))
+    shown = shown[["Timestamp", "Team Member", "File", "State(s)", "Format", "Score %", "Rating", "MLoS Rows",
+                   "Checks", "Pass", "Fail", "Issue Rows", "QC Layers"]]
+    st.dataframe(shown, hide_index=True, use_container_width=True, height=380, column_config={
+        "Timestamp": st.column_config.DatetimeColumn("Timestamp (WAT)", format="D MMM YYYY, HH:mm"),
+        "Score %": st.column_config.ProgressColumn("Score %", min_value=0, max_value=100, format="%.1f%%"),
+        "MLoS Rows": st.column_config.NumberColumn(format="%d"),
+        "Issue Rows": st.column_config.NumberColumn(format="%d"),
+    })
+    st.caption("Rating: 🟢 Good ≥ 80% · 🟡 Fair 60–80% · 🔴 Poor < 60%. Runs where **Share results with team** "
+               "was unticked are not logged, so they do not appear here.")
+
+    # ── Run Details ──
+    st.markdown('<div class="sec-title">🔎 Run Details</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        labels = {r.run_id: f"{r.timestamp} · {r.uploaded_by} · {r.filename} · score {r.weighted_score:.1f}%"
+                  for r in view.itertuples()}
+        sel = st.selectbox("Choose a run", list(labels), format_func=labels.get, key="adm_run")
+        run = view[view["run_id"] == sel].iloc[0]
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Score", f"{run['weighted_score']:.1f}%" if pd.notna(run["weighted_score"]) else "—")
+        d2.metric("Rows checked", f"{int(run['mlos_rows']):,}" if pd.notna(run["mlos_rows"]) else "—")
+        d3.metric("Checks failing", f"{int(run['checks_failing']):,}" if pd.notna(run["checks_failing"]) else "—")
+        d4.metric("Issue rows", f"{int(run['issue_rows']):,}" if pd.notna(run["issue_rows"]) else "—")
+
+        per_state_runs = runs[runs["run_id"] == sel]
+        if not per_state_runs.empty:
+            st.markdown("**Score by state**")
+            pct = st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%")
+            tbl = per_state_runs[["state", "rows", "weighted_score", "schema_pass_pct", "mlos_pass_pct",
+                                  "settlement_pass_pct", "boundary_pass_pct", "failing_checks", "issue_rows"]].copy()
+            for c in tbl.columns[1:]:
+                tbl[c] = pd.to_numeric(tbl[c], errors="coerce")
+            st.dataframe(tbl.rename(columns={
+                "state": "State", "rows": "Rows", "weighted_score": "Score %", "schema_pass_pct": "Schema %",
+                "mlos_pass_pct": "MLoS %", "settlement_pass_pct": "Settlement %", "boundary_pass_pct": "Boundary %",
+                "failing_checks": "Failing Checks", "issue_rows": "Issue Rows"}),
+                hide_index=True, use_container_width=True, column_config={
+                    "Score %": pct, "Schema %": pct, "MLoS %": pct, "Settlement %": pct, "Boundary %": pct})
+        run_rules = rules[rules["run_id"] == sel].copy()
+        if not run_rules.empty:
+            r1, r2 = st.columns([3, 1], vertical_alignment="bottom")
+            r1.markdown("**Rule results**")
+            if r2.toggle("Failing checks only", value=True, key="adm_only_fail"):
+                run_rules = run_rules[run_rules["status"] == "FAIL"]
+            run_rules["status"] = run_rules["status"].map({"PASS": "✅ PASS", "FAIL": "❌ FAIL"}).fillna(run_rules["status"])
+            for c in ["failing_rows", "total_rows"]:
+                run_rules[c] = pd.to_numeric(run_rules[c], errors="coerce")
+            if run_rules.empty:
+                st.success("Every check passed in this run.")
+            else:
+                st.dataframe(run_rules[["state", "layer", "rule", "check", "failing_rows", "total_rows", "status"]]
+                             .rename(columns={"state": "State", "layer": "Layer", "rule": "Rule#", "check": "QC Check",
+                                              "failing_rows": "Failing Rows", "total_rows": "Total Rows",
+                                              "status": "Status"}),
+                             hide_index=True, use_container_width=True)
+        st.caption("Failing rows are kept only for each state's latest run. See them on the 🌍 State Results "
+                   "section of the QC Tool page.")
+
 init_usage_db()
+
+# ─── Team members (the sidebar's "Your name" dropdown) ──────────────────────────────
+TEAM_MEMBERS = sorted([
+    "Adanna Alex", "Babatunde Oladipupo", "Oluwadamilare Akindipe", "Victoria Akinyemi", "Peter Okeke",
+    "Wonderful Oladipupo", "Adedo Lukmon", "Abubakar Abubakar Sani", "Muhammad Abubakar Mbawaya",
+    "Enyinnaya Nwaiwu", "Abatcha Abdulkarim", "Jaiye Oyetoro", "Fashoto Oluwatosin Busayo", "Nasiru Umar",
+    "Olusayo Alabi", "Oluwatosin Ilesanmi", "Racheal Olarewaju",
+])
+OTHER_NAME = "➕ Other (type a new name)"
+
+def team_member_options():
+    """The team list, plus new names already logged through "Other", then the "Other" choice."""
+    try:
+        logged = set(load_results_table("usage_log")["uploaded_by"].str.strip())
+    except Exception:
+        logged = set()
+    known = {n.casefold() for n in TEAM_MEMBERS}
+    extra = sorted((n for n in logged if n and n.casefold() not in known), key=str.casefold)
+    return TEAM_MEMBERS + extra + [OTHER_NAME]
+
+def clean_new_name(name, options):
+    """Tidy a typed name; reuse the existing spelling if it matches a listed name."""
+    name = " ".join(str(name).split())
+    for opt in options:
+        if opt.casefold() == name.casefold():
+            return opt
+    return name
 
 # ─── Email Sender ─────────────────────────────────────────────────────────────────
 def send_qc_email(filename: str, all_checks: list, mlos_fail_rows: int,
@@ -1488,6 +1868,9 @@ def build_excel_report(filename, mlos_checks, mlos_detail, mlos_df):
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    page = st.radio("Page", [NAV_QC, NAV_ADMIN], horizontal=True,
+                    key="nav_page", label_visibility="collapsed")
+    st.markdown("---")
     st.markdown("### 📁 Upload Files")
 
     st.markdown("**MLoS Checkout File**")
@@ -1506,10 +1889,20 @@ with st.sidebar:
         disabled=(uploaded is None),
     )
     if run_qc_btn and uploaded:
-        st.session_state["submitted_key"] = (uploaded.name, getattr(uploaded, "size", None))
-    uploader_name = st.text_input("Your name", key="uploader_name", placeholder="firstname.surname")
+        st.session_state["submitted_key"] = upload_key(uploaded)
+    _name_options = team_member_options()
+    _picked = st.selectbox("Your name", _name_options, index=None, key="uploader_pick",
+                           placeholder="Select your name",
+                           help="Pick your name so the run is credited to you. Not listed? Choose ➕ Other.")
+    if _picked == OTHER_NAME:
+        uploader_name = clean_new_name(
+            st.text_input("New name", key="uploader_new", placeholder="Firstname Surname"), _name_options)
+    else:
+        uploader_name = _picked or ""
     share_results = st.checkbox("Share results with team", value=True, key="share_results",
                                 help="Log this run to the usage database shown in State Results")
+    if share_results and not uploader_name.strip():
+        st.caption("⚠️ No name picked yet. Runs are logged as *(name not given)*.")
     st.markdown("---")
     st.markdown("#### 📋 QC Rules Reference")
     with st.expander("🔧 Auto Correct Rules", expanded=False):
@@ -1577,12 +1970,25 @@ with st.sidebar:
 
 
 # ─── HEADER ───────────────────────────────────────────────────────────────────────
-st.markdown("""
+if page == NAV_ADMIN:
+    st.markdown("""
+<div class="app-header admin">
+  <h1>🔐 ADMIN PANEL</h1>
+  <p>MLOS Checkout QC &nbsp;|&nbsp; Platform usage tracking for every QC run the team has shared</p>
+</div>
+""", unsafe_allow_html=True)
+else:
+    st.markdown("""
 <div class="app-header">
   <h1>🗺️ MLOS CHECKOUT QC</h1>
   <p>Master List of Settlements — Quality Control Dashboard &nbsp;|&nbsp; Upload your files and click ▶️ Run QC to begin</p>
 </div>
 """, unsafe_allow_html=True)
+
+# ─── ADMIN PAGE (chosen at the top of the sidebar) ────────────────────────────────
+if page == NAV_ADMIN:
+    render_admin_page()
+    st.stop()
 
 if not uploaded:
     st.info("👈 **Upload your MLoS file** using the sidebar, then click **▶️ Run QC**.")
@@ -1613,7 +2019,7 @@ Takeoffpoints are checked against the bundled health facility reference — no s
     st.stop()
 
 # ─── Determine submitted state ────────────────────────────────────────────────────
-_current_key = (uploaded.name, getattr(uploaded, "size", None))
+_current_key = upload_key(uploaded)
 _qc_submitted = st.session_state.get("submitted_key") == _current_key
 
 if not _qc_submitted:
@@ -2026,43 +2432,43 @@ with tab5:
             st.markdown("**📋 All Boundary Issue Rows (combined)**")
             st.caption("Includes `ward_code` from the uploaded file and the matched value from the boundary reference for comparison.")
 
-        # Enrich boundary detail with boundary reference ward_code for comparison
-        enriched_detail = boundary_detail.copy()
-        if not boundary_ref.empty and "ward_code" in boundary_ref.columns:
-            ref_lookup = (
-                boundary_ref[["ward_code","ward_name","lga_code","lga_name","state_code"]]
-                .drop_duplicates("ward_code")
-                .rename(columns={
-                    "ward_code":  "Ref Ward Code",
-                    "ward_name":  "Ref Ward Name",
-                    "lga_code":   "Ref LGA Code",
-                    "lga_name":   "Ref LGA Name",
-                    "state_code": "Ref State Code",
-                })
-            )
-            if "ward_code" in enriched_detail.columns:
-                enriched_detail = enriched_detail.merge(
-                    ref_lookup,
-                    left_on="ward_code", right_on="Ref Ward Code",
-                    how="left"
+            # Enrich boundary detail with boundary reference ward_code for comparison
+            enriched_detail = boundary_detail.copy()
+            if not boundary_ref.empty and "ward_code" in boundary_ref.columns:
+                ref_lookup = (
+                    boundary_ref[["ward_code","ward_name","lga_code","lga_name","state_code"]]
+                    .drop_duplicates("ward_code")
+                    .rename(columns={
+                        "ward_code":  "Ref Ward Code",
+                        "ward_name":  "Ref Ward Name",
+                        "lga_code":   "Ref LGA Code",
+                        "lga_name":   "Ref LGA Name",
+                        "state_code": "Ref State Code",
+                    })
                 )
-                enriched_detail["In Boundary Reference"] = enriched_detail["Ref Ward Code"].notna().map(
-                    {True: "Yes", False: "No — not found in reference"}
-                )
+                if "ward_code" in enriched_detail.columns:
+                    enriched_detail = enriched_detail.merge(
+                        ref_lookup,
+                        left_on="ward_code", right_on="Ref Ward Code",
+                        how="left"
+                    )
+                    enriched_detail["In Boundary Reference"] = enriched_detail["Ref Ward Code"].notna().map(
+                        {True: "Yes", False: "No — not found in reference"}
+                    )
 
-        st.dataframe(enriched_detail, use_container_width=True, hide_index=True, height=350)
+            st.dataframe(enriched_detail, use_container_width=True, hide_index=True, height=350)
 
-        buf_b = BytesIO()
-        with pd.ExcelWriter(buf_b, engine="openpyxl") as xw:
-            enriched_detail.to_excel(xw, sheet_name="All Boundary Issues", index=False)
-            for check in boundary_checks:
-                if "FAIL" not in check["Status"]: continue
-                rn  = check["Rule#"]
-                sub = enriched_detail[enriched_detail["Rule#"] == rn].drop(columns=["Rule#","Rule"], errors="ignore")
-                sub.to_excel(xw, sheet_name=f"Rule {rn}"[:31], index=False)
-        st.download_button("⬇️ Download Boundary Issues (Excel)", data=buf_b.getvalue(),
-                           file_name=filename.rsplit(".",1)[0] + "_boundary_issues.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            buf_b = BytesIO()
+            with pd.ExcelWriter(buf_b, engine="openpyxl") as xw:
+                enriched_detail.to_excel(xw, sheet_name="All Boundary Issues", index=False)
+                for check in boundary_checks:
+                    if "FAIL" not in check["Status"]: continue
+                    rn  = check["Rule#"]
+                    sub = enriched_detail[enriched_detail["Rule#"] == rn].drop(columns=["Rule#","Rule"], errors="ignore")
+                    sub.to_excel(xw, sheet_name=f"Rule {rn}"[:31], index=False)
+            st.download_button("⬇️ Download Boundary Issues (Excel)", data=buf_b.getvalue(),
+                               file_name=filename.rsplit(".",1)[0] + "_boundary_issues.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ── Tab 6: Raw Data ───────────────────────────────────────────────────────────────
 with tab6:
