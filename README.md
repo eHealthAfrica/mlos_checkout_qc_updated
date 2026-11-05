@@ -13,9 +13,9 @@ A Streamlit app for running automated Quality Control (QC) checks on MLOS (Maste
 - **Step-by-step progress bar** displayed during QC run
 - **4 QC Layers** run automatically on submission:
   - 🔎 **Schema Alignment** — verifies all required columns are present
-  - 🏘️ **MLoS Rules** — data integrity checks, including takeoffpoint vs. health facility (Rules 1–12)
-  - 📐 **Settlement QC** — duplicate, coordinate, stacking, proximity, and settlement extent checks
-  - 🗺️ **Boundary Checks** — null ward code detection, ward code existence, ward code vs. ward boundary polygon (spatial join), and state name validation against the 9,406-ward admin boundary reference (Sept 2026)
+  - 🏘️ **MLoS Rules** — data integrity checks, including takeoffpoint vs. health facility (Rules 1–22)
+  - 📐 **Settlement QC** — duplicate, coordinate, stacking, proximity, settlement extent, and settlement name checks
+  - 🗺️ **Boundary Checks** — null ward code detection, ward code existence, ward code vs. ward boundary polygon (spatial join), and state, LGA and ward name validation against the 9,406-ward admin boundary reference (Sept 2026)
 - **Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score** displayed on the dashboard
 - Per-rule issue drilldown with expandable row-level detail tables
 - **MLoS Issues — Longitudinal View** — one row per settlement, Yes/No per rule column, downloadable
@@ -153,9 +153,9 @@ Checks whether the uploaded file contains all required columns. Schema failures 
 
 ---
 
-### 4. MLoS QC Checks (Rules 1–12)
+### 4. MLoS QC Checks (Rules 1–22)
 
-Data integrity rules applied to the MLoS table. Rules are numbered sequentially 1–12.
+Data integrity rules applied to the MLoS table. Rules are numbered sequentially 1–22.
 
 | Rule | Check | Description |
 |------|-------|-------------|
@@ -171,6 +171,17 @@ Data integrity rules applied to the MLoS table. Rules are numbered sequentially 
 | 10 | Profile Flags Y/N/NA | `highrisk`, `slums`, `densely_populated`, `hard2reach`, `border`, `nomadic`, `riverine`, `fulani` must be `Y`, `N`, or `NA` |
 | 11 | Editor Format | `editor` must follow the format `firstname.surname` (all lowercase) |
 | 12 | eha_guid is UUID | `eha_guid` must be a valid UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) |
+| 13 | Day of Activity Valid | `day_of_activity` must be `1`, `1_2`, `1_2_3`, `1_2_3_4`, `2`, `2_3`, `2_3_4`, `3`, `3_4`, `4`, or `NA` if not available. Blank fails |
+| 14 | noncompliant_household ≤ number_of_household | `noncompliant_household` must not exceed `number_of_household` |
+| 15 | Whole Numbers ≥ 0 | `set_population`, `set_target`, `number_of_household` and `noncompliant_household` must be whole numbers of 0 or more (one check per column; blank cells are left to Rule 1) |
+| 16 | Inhabited Settlement Has Population | `Inhabited` and `Partially Inhabited` settlements must have `set_population` above 0 |
+| 17 | Abandoned/Migrated Has No Population | `Abandoned` and `Migrated` settlements must have `set_population` and `set_target` of 0 or blank |
+| 18 | Household Size Plausible | `set_population` ÷ `number_of_household` must be between 2 and 15 people per household. Failing rows show `People per Household` |
+| 19 | Valid Dates | `timestamp` and `last_updated` must be real dates and not in the future (one check per column) |
+| 19a | last_updated Not Before timestamp | `last_updated` must not be earlier than `timestamp` |
+| 20 | Unique IDs | `eha_guid`, `mlos_id` and `settlementarea_globalid` must not repeat across rows (one check per column; blank/NA ignored) |
+| 21 | Fully Accessible Has No Inaccessibility Reason | `Fully Accessible` settlements must have `reasons_for_inaccessibility` blank or `NA` |
+| 22 | Team Code — Not Blank | `team_code` must be filled in; use `NA` if not available |
 
 **Nullable fields** (schema allows NULL — not subject to Rule 1): `primarysettlement_name`, `alternate_name`, `reasons_for_inaccessibility`, `habitational_status`, `noncompliant_household`, `team_code`, `day_of_activity`, `source`, `last_updated`, `editor`, `validation_status`, `master_id`, `mlos_id`.
 
@@ -189,7 +200,7 @@ So `PHC Ojede` matches `Ojede Primary Health Center`. Failing rows get a **Close
 
 ---
 
-### 5. Settlement QC Checks (Rules SQ1–SQ6)
+### 5. Settlement QC Checks (Rules SQ1–SQ7)
 
 Spatial integrity checks applied to the MLoS settlement records.
 
@@ -202,6 +213,7 @@ Spatial integrity checks applied to the MLoS settlement records.
 | SQ4 | Settlements Too Close (< 20 m) | Nearest other settlement is less than 20 metres away (Haversine distance) |
 | SQ5 | Settlements Too Close (20–30 m) | Nearest other settlement is 20–30 metres away (Haversine distance) |
 | SQ6 | Not on Settlement Extent (> 50 m) | Settlement point must be on, or within 50 metres of, a GRID3 settlement extent |
+| SQ7 | Settlement Name — Not a Placeholder | `settlement_name` must be a real name: not only numbers or symbols, not 1–2 characters, and not a placeholder such as `test`, `unknown`, `nil` or `xxx`. Blank names are left to Rule 1 |
 
 SQ4 and SQ5 rows are banded by each settlement's nearest neighbour, so a row appears in only one of them. Their detail rows include `Cluster ID` / `Cluster Size` (settlements linked by < 30 m pairs), `Nearest Settlement` and `Nearest Distance (m)`.
 
@@ -209,7 +221,7 @@ SQ6 flags points that sit away from any mapped buildings, which usually means a 
 
 ---
 
-### 6. Boundary Checks (Rules B0–B3)
+### 6. Boundary Checks (Rules B0–B6)
 
 Spatial and reference validation against the admin ward boundary dataset (9,406 wards, Sept 2026 release).
 
@@ -219,6 +231,9 @@ Spatial and reference validation against the admin ward boundary dataset (9,406 
 | B1 | Ward Code — Boundary Reference | `ward_code` must exist in the boundary reference for the file's state(s) (only checked for rows with a non-null ward_code) |
 | B2 | Ward Code — Boundary Spatial Match | Each point is spatially joined to the ward boundary polygons; the `ward_code` on the settlement must equal the ward code of the polygon it falls in. Failing rows show `Boundary Ward Code` / `Boundary Ward Name` (or "No ward found at coordinates"). Skipped only when the point is in no ward and the declared ward has no polygon |
 | B3 | State Name — Boundary Reference Match | `state_name` in MLoS must match the `state_name` the boundary reference assigns to the same `ward_code` |
+| B4 | LGA — Boundary Reference Match | `lga_code` and `lga_name` must match the LGA the `ward_code` belongs to in the boundary reference. Names are compared ignoring case, punctuation and small spelling differences. Failing rows show `Ref LGA Code` / `Ref LGA Name` |
+| B5 | Ward Name — Boundary Reference Match | `ward_name` must match the reference name for the `ward_code` (same tolerance as B4). Failing rows show `Ref Ward Name` |
+| B6 | State Code — Boundary Reference Match | `state_code` must match the reference `state_code` for the `ward_code`. Failing rows show `Ref State Code` |
 
 **State filtering (B1):** The boundary reference is pre-filtered by `state_name` (e.g. "Nasarawa", "Kano") matched case-insensitively against the uploaded file's `state_name` column. Fallback to the full 9,406-ward reference if no match is found.
 
@@ -394,7 +409,7 @@ All reference data ships with the repo and is loaded once per app session.
 
 | File | Size | Contents | Used By | Source |
 |------|------|----------|---------|--------|
-| `ward_boundary_ref.csv` | 0.4 MB | 9,406 ward codes with state, LGA, and ward metadata | B1, B2, B3 | `ward_boundary_sept.sqlite` (Sept 2026) |
+| `ward_boundary_ref.csv` | 0.4 MB | 9,406 ward codes with state, LGA, and ward metadata | B1, B2, B3, B4, B5, B6 | `ward_boundary_sept.sqlite` (Sept 2026) |
 | `ward_boundary_geom.csv.gz` | 7.7 MB | 9,305 ward polygons (WKB hex, EPSG:4326), one per ward code | B2 | `ward_boundary_sept.sqlite` |
 | `health_facility_ref.csv.gz` | 1.5 MB | 51,201 health facilities (`ward_code`, `primary_name`, `alternate_name`, `globalid`) across 8,912 wards | Rule 2 | `health_facilities.sqlite` |
 | `settlement_extent_mask.npz` | 18.9 MB | GRID3 Nigeria settlement extents v4.1 (2.55 M blocks) as a 25 m EPSG:3857 grid | SQ6 | `settlement_extent.gpkg` |
@@ -416,7 +431,7 @@ python scripts/build_extent_mask.py /path/to/settlement_extent.gpkg  settlement_
 
 | Script | Extra packages (build-time only) | Notes |
 |--------|----------------------------------|-------|
-| `build_ward_ref.py` | — | Reads state codes from the existing `ward_boundary_ref.csv`, so that file must already be in the output folder |
+| `build_ward_ref.py` | — | Reads state codes from the existing `ward_boundary_ref.csv`, so that file must already be in the output folder. |
 | `build_ward_geom.py` | `geopandas` | Drops empty geometries, repairs invalid ones, dissolves duplicate ward codes |
 | `build_hf_ref.py` | — | Drops facilities with no `ward_code` or `primary_name` |
 | `build_extent_mask.py` | `rasterio`, `pyogrio` | Takes a few minutes and ~3 GB of RAM |

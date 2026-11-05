@@ -1748,16 +1748,6 @@ BE,Benue,BNSBRT,Obi,BNSBRT09,Ogore
 BE,Benue,BNSBRT,Obi,BNSBRT10,Okpokwu
 BE,Benue,BNSBRT,Obi,BNSBRT11,Okwutungbe
 BE,Benue,BNSBRT,Obi,BNSBRT12,Orihi
-BE,Benue,BNSBRT,Obi,NASNBB01,Adudu
-BE,Benue,BNSBRT,Obi,NASNBB02,Agwatashi
-BE,Benue,BNSBRT,Obi,NASNBB03,Daddare
-BE,Benue,BNSBRT,Obi,NASNBB04,Duduguru
-BE,Benue,BNSBRT,Obi,NASNBB05,Gidan-Ausa I
-BE,Benue,BNSBRT,Obi,NASNBB06,Gidan-Ausa II
-BE,Benue,BNSBRT,Obi,NASNBB07,Gwadenye
-BE,Benue,BNSBRT,Obi,NASNBB08,Kyakale
-BE,Benue,BNSBRT,Obi,NASNBB09,Obi
-BE,Benue,BNSBRT,Obi,NASNBB10,Tudun-Adabu
 BE,Benue,BNSBGT,Ogbadibo,BNSBGT01,Agboriko
 BE,Benue,BNSBGT,Ogbadibo,BNSBGT02,Ai-Oche
 BE,Benue,BNSBGT,Ogbadibo,BNSBGT03,Ai-Ona
@@ -6603,6 +6593,16 @@ NA,Nasarawa,NASNEG,Nasarawa Egon,NASNEG11,Ogbabi
 NA,Nasarawa,NASNEG,Nasarawa Egon,NASNEG12,Ubbe-Ogba
 NA,Nasarawa,NASNEG,Nasarawa Egon,NASNEG13,Umme
 NA,Nasarawa,NASNEG,Nasarawa Egon,NASNEG14,Wakama
+NA,Nasarawa,NASNBB,Obi,NASNBB01,Adudu
+NA,Nasarawa,NASNBB,Obi,NASNBB02,Agwatashi
+NA,Nasarawa,NASNBB,Obi,NASNBB03,Daddare
+NA,Nasarawa,NASNBB,Obi,NASNBB04,Duduguru
+NA,Nasarawa,NASNBB,Obi,NASNBB05,Gidan-Ausa I
+NA,Nasarawa,NASNBB,Obi,NASNBB06,Gidan-Ausa II
+NA,Nasarawa,NASNBB,Obi,NASNBB07,Gwadenye
+NA,Nasarawa,NASNBB,Obi,NASNBB08,Kyakale
+NA,Nasarawa,NASNBB,Obi,NASNBB09,Obi
+NA,Nasarawa,NASNBB,Obi,NASNBB10,Tudun-Adabu
 NA,Nasarawa,NASNTT,Toto,NASNTT01,Dausu
 NA,Nasarawa,NASNTT,Toto,NASNTT02,Garagwa
 NA,Nasarawa,NASNTT,Toto,NASNTT03,Gwalgwada

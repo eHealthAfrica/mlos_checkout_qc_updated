@@ -153,6 +153,31 @@ EDITOR_RE   = re.compile(r'^[a-z]+\.[a-z]+$')
 # primarysettlement_name, alternate_name, reasons_for_inaccessibility
 YN_NA_COLS  = {"highrisk","slums","densely_populated","hard2reach","border",
                "nomadic","riverine","fulani"}
+INHABITED     = {"Inhabited", "Partially Inhabited"}
+NOT_INHABITED = {"Abandoned", "Migrated"}
+HH_SIZE_MIN, HH_SIZE_MAX = 2, 15          # plausible people per household (Rule 18)
+NAME_MATCH_CUTOFF = 0.85                  # similarity needed for LGA/ward names to match (B4, B5)
+NO_REASON   = {"", "NA", "N/A", "NONE", "NIL", "NULL"}   # "no reason given" spellings (Rule 21)
+PLACEHOLDER_NAMES = {"test", "testing", "sample", "unknown", "unk", "nil", "null", "none", "na", "n a",
+                     "no name", "noname", "not available", "settlement", "new settlement",
+                     "abc", "xyz"}         # junk settlement names (SQ7)
+
+def _txt(series):
+    """Column as stripped text, blanks as ''."""
+    return series.fillna("").astype(str).str.strip()
+
+def _num(series):
+    """Column as numbers; blanks and non-numbers become NaN."""
+    return pd.to_numeric(_txt(series).where(lambda s: s.ne("")), errors="coerce")
+
+def _name_key(s):
+    return re.sub(r"[^a-z0-9]+", " ", str(s).lower().replace("&", " and ")).strip()
+
+def names_match(a, b, cutoff=NAME_MATCH_CUTOFF):
+    """True if two place names match, ignoring case, punctuation, spacing and small spelling differences."""
+    a, b = _name_key(a), _name_key(b)
+    return (a == b or a.replace(" ", "") == b.replace(" ", "")
+            or difflib.SequenceMatcher(None, a, b).ratio() >= cutoff)
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────────
 def load_sqlite(uploaded_file):
@@ -674,6 +699,52 @@ def run_ward_boundary_qc(mlos: pd.DataFrame, ref_df: pd.DataFrame, geom_df: pd.D
             "state_name in MLoS must match the state_name assigned to the ward_code in the boundary reference",
             mask_b3, ["ward_code", "state_name"])
 
+    # B4 / B5 / B6 — LGA, ward name and state code must agree with the reference for the ward_code.
+    # Only rows whose ward_code is in the reference are compared (unknown codes are B1's job).
+    if not ref_df.empty and {"ward_code", "lga_code", "lga_name", "ward_name", "state_code"} <= set(ref_df.columns):
+        ref_by_wc = ref_df.drop_duplicates("ward_code").set_index("ward_code")
+        wc_s  = _txt(mlos["ward_code"])
+        found = wc_s.isin(ref_by_wc.index)
+        ref   = lambda c: wc_s.map(ref_by_wc[c]).fillna("")
+
+        def name_mismatch(col, ref_col):
+            got, want = _txt(mlos[col]), ref(ref_col)
+            pairs = {p: names_match(*p) for p in set(zip(got, want))}
+            return found & got.ne("") & ~pd.Series([pairs[p] for p in zip(got, want)], index=mlos.index)
+
+        def add_with_ref(num, rule, desc, mask, extra, ref_cols):
+            add(num, rule, desc, mask, extra)
+            if mask.any():
+                for label, c in ref_cols:
+                    details[-1][label] = ref(c)[mask].values
+
+        if "lga_code" in mlos.columns or "lga_name" in mlos.columns:
+            bad = pd.Series(False, index=mlos.index)
+            if "lga_code" in mlos.columns:
+                got = _txt(mlos["lga_code"]).str.upper()
+                bad |= found & got.ne("") & got.ne(ref("lga_code").str.upper())
+            if "lga_name" in mlos.columns:
+                bad |= name_mismatch("lga_name", "lga_name")
+            add_with_ref("B4", "LGA — Boundary Reference Match",
+                         "lga_code and lga_name must match the LGA the ward_code belongs to in the boundary "
+                         "reference (names compared ignoring case, punctuation and small spelling differences)",
+                         bad, ["ward_code", "lga_code", "lga_name"],
+                         [("Ref LGA Code", "lga_code"), ("Ref LGA Name", "lga_name")])
+
+        if "ward_name" in mlos.columns:
+            add_with_ref("B5", "Ward Name — Boundary Reference Match",
+                         "ward_name must match the boundary reference name for the ward_code "
+                         "(case, punctuation and small spelling differences ignored)",
+                         name_mismatch("ward_name", "ward_name"), ["ward_code", "ward_name"],
+                         [("Ref Ward Name", "ward_name")])
+
+        if "state_code" in mlos.columns:
+            got = _txt(mlos["state_code"]).str.upper()
+            add_with_ref("B6", "State Code — Boundary Reference Match",
+                         "state_code must match the state_code of the ward_code in the boundary reference",
+                         found & got.ne("") & got.ne(ref("state_code").str.upper()),
+                         ["ward_code", "state_code"], [("Ref State Code", "state_code")])
+
     # B2 — spatial join: the ward_code of the boundary polygon each point falls in
     # must equal the ward_code on the settlement. Rows are skipped only when the
     # point falls in no ward AND the declared ward has no polygon to compare against.
@@ -870,6 +941,21 @@ def run_settlement_qc(mlos: pd.DataFrame, extents=None):
             details[-1]["Nearest Extent (m)"] = [f"> {EXTENT_SEARCH_M}" if np.isinf(d) else str(int(round(d, -1)))
                                                  for d in far_d]
             details[-1]["Nearest Extent Type"] = EXTENT_TYPES[far_t]
+
+    # SQ7 — settlement_name must be a real name, not a placeholder (blank names are left to Rule 1)
+    if "settlement_name" in mlos.columns:
+        sn  = _txt(mlos["settlement_name"])
+        key = sn.map(_name_key)
+        junk = sn.ne("") & (
+            ~sn.str.contains(r"[^\W\d_]", regex=True)            # no letters at all, e.g. "123", "--"
+            | key.str.replace(" ", "", regex=False).str.len().le(2)   # 1–2 characters
+            | key.isin(PLACEHOLDER_NAMES)                          # "test", "unknown", "nil", ...
+            | key.str.replace(" ", "", regex=False).str.fullmatch(r"(.)\1+")  # "xxx", "aaaa"
+        )
+        add("SQ7", "Settlement Name — Not a Placeholder",
+            "settlement_name must be a real name: not only numbers or symbols, not 1–2 characters, "
+            "and not a placeholder such as test, unknown, nil or xxx",
+            junk.fillna(False), ["settlement_name"])
 
     return checks, pd.concat(details) if details else pd.DataFrame()
 
@@ -1729,6 +1815,94 @@ def run_mlos_qc(mlos: pd.DataFrame, hf_by_ward: dict):
             "eha_guid must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)",
             ~vec_is_uuid(mlos["eha_guid"]), ["eha_guid"])
 
+    # R13 — day_of_activity must be a valid day code, or NA if not available (not blank)
+    if "day_of_activity" in mlos.columns:
+        day = _txt(mlos["day_of_activity"]).str.replace(r"\.0$", "", regex=True)
+        add("13", "Day of Activity Valid",
+            "day_of_activity must be 1, 1_2, 1_2_3, 1_2_3_4, 2, 2_3, 2_3_4, 3, 3_4, 4, or NA (not blank)",
+            ~day.isin(VALID_DAY), ["day_of_activity"])
+
+    # R14 — non-compliant households cannot outnumber households
+    if "noncompliant_household" in mlos.columns and "number_of_household" in mlos.columns:
+        mask = (_num(mlos["noncompliant_household"]) > _num(mlos["number_of_household"])).fillna(False)
+        add("14", "noncompliant_household ≤ number_of_household",
+            "noncompliant_household must not exceed number_of_household",
+            mask, ["noncompliant_household", "number_of_household"])
+
+    # R15 — counts must be whole numbers ≥ 0 (blank cells are left to Rule 1)
+    for col in ["set_population", "set_target", "number_of_household", "noncompliant_household"]:
+        if col in mlos.columns:
+            v = _num(mlos[col])
+            filled = _txt(mlos[col]).ne("")
+            add("15", f"{col} is a whole number ≥ 0",
+                f"{col} must be a whole number of 0 or more (no text, decimals or negatives)",
+                filled & ~(v.notna() & (v >= 0) & (v == v.round())), [col])
+
+    # R16 / R17 — population must agree with habitational_status
+    if "habitational_status" in mlos.columns and "set_population" in mlos.columns:
+        hab = _txt(mlos["habitational_status"])
+        pop = _num(mlos["set_population"])
+        add("16", "Inhabited Settlement Has Population",
+            "Inhabited and Partially Inhabited settlements must have set_population above 0",
+            hab.isin(INHABITED) & (pop <= 0).fillna(False),
+            ["habitational_status", "set_population"])
+        tgt = _num(mlos["set_target"]) if "set_target" in mlos.columns else pd.Series(np.nan, index=mlos.index)
+        add("17", "Abandoned/Migrated Has No Population",
+            "Abandoned and Migrated settlements must have set_population and set_target of 0 or blank",
+            hab.isin(NOT_INHABITED) & ((pop > 0) | (tgt > 0)).fillna(False),
+            ["habitational_status", "set_population", "set_target"])
+
+    # R18 — people per household must be plausible
+    if "set_population" in mlos.columns and "number_of_household" in mlos.columns:
+        pop = _num(mlos["set_population"])
+        hh  = _num(mlos["number_of_household"])
+        size = (pop / hh).where((pop > 0) & (hh > 0))
+        mask = ((size < HH_SIZE_MIN) | (size > HH_SIZE_MAX)).fillna(False)
+        add("18", "Household Size Plausible",
+            f"set_population ÷ number_of_household must be between {HH_SIZE_MIN} and {HH_SIZE_MAX} people per household",
+            mask, ["set_population", "number_of_household"])
+        if mask.any():
+            details[-1]["People per Household"] = size[mask].round(1).values
+
+    # R19 — dates must be real dates, not in the future, and last_updated not before timestamp
+    _dates = {}
+    _latest_ok = pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=1)   # 1-day allowance for time zones
+    for col in ["timestamp", "last_updated"]:
+        if col in mlos.columns:
+            raw = _txt(mlos[col])
+            dt  = pd.to_datetime(raw.where(raw.ne("")), errors="coerce", utc=True, format="mixed")
+            _dates[col] = dt
+            add("19", f"{col} is a Valid Date",
+                f"{col} must be a real date and not in the future",
+                raw.ne("") & (dt.isna() | (dt > _latest_ok)), [col])
+    if len(_dates) == 2:
+        add("19a", "last_updated Not Before timestamp",
+            "last_updated must not be earlier than timestamp",
+            (_dates["last_updated"] < _dates["timestamp"]).fillna(False), ["timestamp", "last_updated"])
+
+    # R20 — IDs must be unique within the file
+    for col in ["eha_guid", "mlos_id", "settlementarea_globalid"]:
+        if col in mlos.columns:
+            v = _txt(mlos[col]).str.lower()
+            filled = ~v.isin({"", "na", "null", "none"})
+            add("20", f"{col} is Unique",
+                f"{col} must not be repeated on more than one row",
+                filled & v.duplicated(keep=False), [col])
+
+    # R21 — Fully Accessible settlements should not give a reason for inaccessibility
+    if "accessibility_status" in mlos.columns and "reasons_for_inaccessibility" in mlos.columns:
+        add("21", "Fully Accessible Has No Inaccessibility Reason",
+            "Fully Accessible settlements must have reasons_for_inaccessibility blank or NA",
+            _txt(mlos["accessibility_status"]).eq("Fully Accessible")
+            & ~_txt(mlos["reasons_for_inaccessibility"]).str.upper().isin(NO_REASON),
+            ["accessibility_status", "reasons_for_inaccessibility"])
+
+    # R22 — team_code must be filled in (NA allowed when not available)
+    if "team_code" in mlos.columns:
+        add("22", "Team Code — Not Blank",
+            "team_code must be filled in (use NA if not available)",
+            _txt(mlos["team_code"]).eq(""), ["team_code"])
+
     # Keep original mlos_df indices so make_longitudinal_df can match failing rows correctly
     return checks, pd.concat(details) if details else pd.DataFrame()
 
@@ -2137,6 +2311,17 @@ with st.sidebar:
 | 10 | Profile flags = Y/N/NA (highrisk, slums, densely_populated, hard2reach, border, nomadic, riverine, fulani) |
 | 11 | editor = firstname.surname (lowercase) |
 | 12 | eha_guid = valid UUID |
+| 13 | day_of_activity = 1, 1_2, 1_2_3, 1_2_3_4, 2, 2_3, 2_3_4, 3, 3_4, 4 or NA (not blank) |
+| 14 | noncompliant_household ≤ number_of_household |
+| 15 | set_population, set_target, number_of_household, noncompliant_household are whole numbers ≥ 0 |
+| 16 | Inhabited / Partially Inhabited → set_population > 0 |
+| 17 | Abandoned / Migrated → set_population and set_target are 0 or blank |
+| 18 | People per household (set_population ÷ number_of_household) between 2 and 15 |
+| 19 | timestamp and last_updated are real dates, not in the future |
+| 19a | last_updated is not earlier than timestamp |
+| 20 | eha_guid, mlos_id and settlementarea_globalid are not repeated |
+| 21 | Fully Accessible → reasons_for_inaccessibility is blank or NA |
+| 22 | team_code is filled in (NA if not available) |
         """)
     with st.expander("📐 Settlement QC Rules", expanded=False):
         st.markdown("""
@@ -2149,6 +2334,7 @@ with st.sidebar:
 | SQ4 | Nearest other settlement must not be < 20 m away (proximity cluster) |
 | SQ5 | Nearest other settlement must not be 20–30 m away (proximity cluster) |
 | SQ6 | Settlement must be on, or within 50 m of, a GRID3 settlement extent |
+| SQ7 | settlement_name is a real name: not only numbers/symbols, not 1–2 characters, not a placeholder (test, unknown, nil, xxx…) |
         """)
     with st.expander("🗺️ Boundary Check Rules", expanded=False):
         st.markdown("""
@@ -2158,6 +2344,9 @@ with st.sidebar:
 | B1 | ward_code exists in admin ward boundary reference (9,406 wards) |
 | B2 | ward_code matches the ward boundary polygon the latitude/longitude falls in |
 | B3 | state_name in MLoS matches the state_name assigned to that ward_code in the boundary reference |
+| B4 | lga_code and lga_name match the LGA of that ward_code in the boundary reference |
+| B5 | ward_name matches the boundary reference name for that ward_code (small spelling differences allowed) |
+| B6 | state_code matches the state_code of that ward_code in the boundary reference |
         """)
     st.markdown("---")
     st.caption("eHealth Africa · MLOS QC Tool · v1.1")
@@ -2199,9 +2388,9 @@ Takeoffpoints are checked against the bundled health facility reference — no s
 
 **QC Layers:**
 - 🔎 **Schema Alignment** (S1) — verifies all required columns are present
-- 🏘️ **MLoS Rules** (1–12) — data integrity checks, including takeoffpoint vs. health facility
-- 📐 **Settlement QC** (SQ1–SQ6) — duplicate, coordinate, stacking, proximity, and settlement extent checks
-- 🗺️ **Boundary Checks** (B0–B3) — ward code, spatial ward match, and state name validation against admin boundary reference
+- 🏘️ **MLoS Rules** (1–22) — data integrity checks, including takeoffpoint vs. health facility, population, dates and unique IDs
+- 📐 **Settlement QC** (SQ1–SQ7) — duplicate, coordinate, stacking, proximity, settlement extent and name checks
+- 🗺️ **Boundary Checks** (B0–B6) — ward code, spatial ward match, and state, LGA and ward name validation against admin boundary reference
 
 **Outputs:**
 - Pass Rate %, Fail Rate %, and 🏆 Weighted QC Score on the dashboard
