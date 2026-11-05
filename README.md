@@ -23,7 +23,7 @@ A Streamlit app for running automated Quality Control (QC) checks on MLOS (Maste
 - **Proximity clusters** — settlements under 20 m and 20–30 m from their nearest neighbour, grouped by cluster
 - **Settlement extent check** — flags settlement points more than 50 m from any GRID3 settlement extent, with the distance to and type of the nearest extent
 - **All reference data bundled** — ward boundaries, health facilities, and settlement extents ship with the app; no extra uploads
-- **Generate Report tab** — full QC verdict (CLEAN / FAILING) + downloadable Excel report
+- **Generate Report tab** — full QC verdict (CLEAN / FAILING), a breakdown by category (MLoS, Settlement, Boundary, Schema), and downloadable Excel and PDF reports
 - **Send QC Email** — sends summary to the data team on demand
 - **🌍 State Results** — every run is logged to a SQLite usage database, so anyone can compare the latest score per state, follow scores over time, and drill into a state's failing rows
 
@@ -51,7 +51,7 @@ All formats get the same full set of checks.
 | 📐 Settlement QC | Row-level drilldown for each failing settlement check (duplicates, coordinates, proximity, settlement extent) + download |
 | 🗺️ Boundary Issues | Null/missing ward codes (B0), unmatched ward codes (B1), ward code vs. spatially-joined boundary ward mismatches (B2), state name mismatches (B3), with boundary reference comparison columns |
 | 🔍 Raw Data | Filterable view of the full MLoS dataset |
-| 📄 Generate Report | Full QC verdict, Excel report download, and Send Email button |
+| 📄 Generate Report | Full QC verdict, breakdown by category, Excel and PDF report downloads, and Send Email button |
 | 🌍 State Results | Shared results from all users: latest run per state, score trend, and per-state rule results and failing rows (also shown on the start page before any upload) |
 
 ---
@@ -197,7 +197,7 @@ Spatial integrity checks applied to the MLoS settlement records.
 |------|-------|-------------|
 | SQ1 | Duplicate Settlement Name in Ward | `settlement_name` must be unique within each `ward_code` — compared ignoring case and extra spaces; blank names are left to Rule 1 |
 | SQ2 | Latitude/Longitude — Not Null | `latitude` and `longitude` must not be null or missing |
-| SQ2b | Latitude/Longitude — Not Zero | `latitude` and `longitude` must not be zero (checked only on non-null rows) |
+| SQ2b | Latitude/Longitude — settlement with "0" or blanks | `latitude` and `longitude` must not be 0 or blank (blank coordinates are also counted by SQ2) |
 | SQ3 | Stacked Coordinates | No two settlements may share identical `latitude`/`longitude` coordinates |
 | SQ4 | Settlements Too Close (< 20 m) | Nearest other settlement is less than 20 metres away (Haversine distance) |
 | SQ5 | Settlements Too Close (20–30 m) | Nearest other settlement is 20–30 metres away (Haversine distance) |
@@ -290,11 +290,16 @@ The **MLoS Issues** tab includes a longitudinal (wide-format) view of all settle
 
 Go to the **Generate Report** tab to:
 
-1. See the overall QC verdict: `✅ CLEAN` or `❌ FAILING`
-2. Download the Excel report (Cover · MLoS QC Summary · MLoS Issue Detail · Raw MLoS Data)
-3. Download and share with the data team or programme leads
+1. See the overall QC verdict (`✅ CLEAN` or `❌ FAILING`), the weighted score, and a **Summary by Category** table
+2. Review the check breakdown for each category, in this order: **🏘️ MLoS**, **📐 Settlement**, **🗺️ Boundary**, **🔎 Schema**
+3. Download the report as **Excel** or **PDF** and share it with the data team or programme leads
 
-The report file is named: `{filename}_QC_Report.xlsx`
+| Format | Contents |
+|--------|----------|
+| PDF | Cover (file details, weighted score, verdict) · Summary by Category · MLoS, Settlement, Boundary and Schema Check Breakdowns. Row-level issues are left out to keep it short |
+| Excel | Cover with the Summary by Category · for each category, a **Breakdown** sheet (every check) and an **Issues** sheet (failing rows) · Raw MLoS Data |
+
+The report files are named `{filename}_QC_Report.xlsx` and `{filename}_QC_Report.pdf`.
 
 ---
 
